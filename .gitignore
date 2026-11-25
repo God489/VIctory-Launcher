@@ -76,3 +76,7 @@
 *.swp
 Thumbs.db
 .DS_Store
+
+# The launcher: what its build fetches and makes
+/launcher/build/
+/launcher/vendor/

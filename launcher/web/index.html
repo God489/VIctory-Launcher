@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VIctory Launcher</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="brand" data-drag>
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><use href="#logo"/></svg>
+      <div class="brand-text"><b>VIctory</b><span>LAUNCHER</span></div>
+    </div>
+    <nav id="nav">
+      <button data-page="play" class="active"><svg><use href="#i-play"/></svg><span>Play</span></button>
+      <button data-page="settings"><svg><use href="#i-sliders"/></svg><span>Settings</span></button>
+      <button data-page="compat"><svg><use href="#i-chip"/></svg><span>Compatibility</span></button>
+      <button data-page="inside"><svg><use href="#i-layers"/></svg><span>What's inside</span></button>
+      <button data-page="logs"><svg><use href="#i-terminal"/></svg><span>Logs</span><em id="logBadge" hidden></em></button>
+      <button data-page="about"><svg><use href="#i-info"/></svg><span>About</span></button>
+    </nav>
+    <div class="rail-foot">
+      <div class="run-pill" id="runPill"><i></i><span>Ready</span></div>
+      <div class="build-chip" id="buildChip">build —</div>
+    </div>
+  </aside>
+
+  <main>
+    <header class="titlebar" data-drag>
+      <div class="crumb" id="crumb">Play</div>
+      <div class="wc">
+        <button id="btnMin" title="Minimize"><svg viewBox="0 0 12 12"><path d="M2 6h8"/></svg></button>
+        <button id="btnClose" class="close" title="Close"><svg viewBox="0 0 12 12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"/></svg></button>
+      </div>
+    </header>
+
+    <!-- ================= PLAY ================= -->
+    <section class="page active" id="page-play">
+      <div class="hero" id="hero">
+        <div class="hero-art"></div>
+        <div class="hero-body">
+          <div class="eyebrow" id="heroEyebrow">Xbox Series X|S runtime for Windows</div>
+          <h1 id="heroTitle">Add your game</h1>
+          <p class="hero-sub" id="heroSub">Point the launcher at your own copy of the game. No game files come with it.</p>
+
+          <div class="game-empty" id="gameEmpty">
+            <div class="dropzone" id="dropzone">
+              <svg><use href="#i-folder"/></svg>
+              <div>
+                <b>Drop your game folder here</b>
+                <span>The folder that holds <code>MicrosoftGame.config</code> and the game's <code>.exe</code></span>
+              </div>
+              <div class="dz-actions">
+                <button class="btn primary" id="btnBrowse">Browse folder</button>
+                <button class="btn ghost" id="btnExe">Choose .exe</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="game-ready" id="gameReady" hidden>
+            <div class="chips" id="gameChips"></div>
+            <div class="play-row">
+              <button class="play" id="btnPlay">
+                <svg class="pi"><use href="#i-play-fill"/></svg>
+                <span class="pl">PLAY</span>
+              </button>
+              <div class="running" id="runningBox" hidden>
+                <div class="live"><i></i>Running</div>
+                <div class="stats">
+                  <div><b id="stElapsed">0:00</b><span>time</span></div>
+                  <div><b id="stFps">—</b><span>fps</span></div>
+                  <div><b id="stMs">—</b><span>ms / frame</span></div>
+                </div>
+                <button class="btn ghost" id="btnShow">Show game</button>
+                <button class="btn danger" id="btnStop">Stop</button>
+              </div>
+              <div class="seg" id="segConsole" data-setting="console">
+                <button data-v="series-x">Series X</button>
+                <button data-v="series-s">Series S</button>
+              </div>
+              <button class="icon-btn" id="btnVerify" title="Check the game files with VIctory"><svg><use href="#i-check"/></svg></button>
+              <button class="icon-btn" id="btnFolder" title="Open the game folder"><svg><use href="#i-folder"/></svg></button>
+              <button class="icon-btn" id="btnChange" title="Use another game folder"><svg><use href="#i-swap"/></svg></button>
+            </div>
+            <div class="path" id="gamePath"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="notice" id="firstRun" hidden>
+        <svg><use href="#i-clock"/></svg>
+        <div><b>The first start takes a while.</b> VIctory translates every shader and builds about 2,500 pipelines before the world shows; the loading screen can stay frozen, with sound, for minutes. Later starts use the cache.</div>
+        <button class="x" id="firstRunX" title="Hide">×</button>
+      </div>
+
+      <div class="verify" id="verifyBox" hidden></div>
+
+      <h2 class="section">Before the first run</h2>
+      <div class="tools">
+        <div class="tool" id="toolShaders">
+          <div class="h"><b>Prepare shaders</b><span class="tag">a few minutes</span></div>
+          <p>Translates every shader of your game into the cache now, so that no run has to. Once per new build of the launcher.</p>
+          <div class="act"><button class="btn primary sm" data-tool="shaders">Prepare</button><button class="btn ghost sm" data-cancel-tool hidden>Stop</button><span class="muted" data-tool-state></span></div>
+          <div class="last" data-tool-last></div>
+        </div>
+        <div class="tool" id="toolWarm">
+          <div class="h"><b>Warm pipelines</b><span class="tag">after a run</span></div>
+          <p>Builds the pipelines earlier runs drew with, so the driver has them before the game asks: fewer stalls after a new driver or build. Can be stopped and goes on later.</p>
+          <div class="act"><button class="btn primary sm" data-tool="warm">Warm</button><button class="btn ghost sm" data-cancel-tool hidden>Stop</button><span class="muted" data-tool-state></span></div>
+          <div class="last" data-tool-last></div>
+        </div>
+      </div>
+
+      <h2 class="section">This PC</h2>
+      <div class="ready-grid" id="readyGrid">
+        <div class="tile skeleton"></div><div class="tile skeleton"></div><div class="tile skeleton"></div>
+        <div class="tile skeleton"></div><div class="tile skeleton"></div><div class="tile skeleton"></div>
+      </div>
+    </section>
+
+    <!-- ================= SETTINGS ================= -->
+    <section class="page" id="page-settings">
+      <div class="page-head">
+        <h1>Settings</h1>
+        <p>Each option sets what VIctory reads at start. The variable it sets is shown beside it.</p>
+      </div>
+
+      <div class="card">
+        <h3>Console</h3>
+        <div class="row">
+          <div class="label"><b>Console model</b><span>The device type and memory the title sees.</span><code>--console</code></div>
+          <div class="seg" data-setting="console"><button data-v="series-x">Series X</button><button data-v="series-s">Series S</button></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Speed</h3>
+        <div class="row">
+          <div class="label"><b>Mode</b><span>Fast is how the 7900XTX fork is played and measured: list calls written down and translated by eight threads, submissions joined, textures sent ahead. Safe leaves the newest of these out: the first thing to try when something is wrong.</span><code>VICTORY_THIN · VICTORY_JOIN_PARTS · VICTORY_UPLOAD_AHEAD</code></div>
+          <div class="seg" data-setting="mode"><button data-v="fast">Fast</button><button data-v="safe">Safe</button></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Performance panel</b><span>Numbers of where a frame goes, on the picture. F3 shows and hides it. It costs a little, so it is off by default.</span><code>VICTORY_PANEL</code></div>
+          <label class="switch"><input type="checkbox" data-setting="panel"><i></i></label>
+        </div>
+        <div class="row">
+          <div class="label"><b>Remember pipelines</b><span>Writes down the pipelines each run makes, so that Warm pipelines can build them ahead for a new driver or build.</span><code>VICTORY_PIPELINE_BOOK</code></div>
+          <div class="seg" data-setting="pipelineBook"><button data-v="on">On</button><button data-v="off">Off</button></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Image</h3>
+        <div class="row">
+          <div class="label"><b>Ray-traced indirect light</b><span>The title's own ray-traced light: lit interiors, about a third slower.</span><code>VICTORY_BVH_BUILDER</code></div>
+          <label class="switch"><input type="checkbox" data-setting="rayTracing"><i></i></label>
+        </div>
+        <div class="row">
+          <div class="label"><b>Light in shadowed places</b><span>Without ray tracing, an estimate of the light around stands in for the indirect light (0.8 as played). Off leaves what the title's resolve pass wrote.</span><code>VICTORY_AMBIENT</code></div>
+          <div class="range"><label class="switch sm"><input type="checkbox" id="ambientOn"><i></i></label><input type="range" min="0.1" max="1.5" step="0.05" id="ambientLevel"><output id="ambientOut"></output></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Texture read-back</b><span>Textures that shaders write and the title's CPU reads go back to its memory: the sea's height for boats (on by default; off, boats sink).</span><code>VICTORY_TEXTURE_BACK</code></div>
+          <div class="seg" data-setting="textureBack"><button data-v="on">On</button><button data-v="off">Off</button></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Compatibility</h3>
+        <div class="row">
+          <div class="label"><b>Unimplemented system calls</b><span>Trap stops at the first one; Zero returns 0 and goes on.</span><code>--unimplemented</code></div>
+          <div class="seg" data-setting="unimplemented"><button data-v="trap">Trap</button><button data-v="zero">Zero</button></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Strict mode</b><span>No host pass-through: everything must be implemented by VIctory.</span><code>--strict</code></div>
+          <label class="switch"><input type="checkbox" data-setting="strict"><i></i></label>
+        </div>
+        <div class="row">
+          <div class="label"><b>Title arguments</b><span>Passed to the game after <code class="inline">--</code>.</span></div>
+          <input class="text" type="text" spellcheck="false" data-setting="titleArgs" placeholder="none">
+        </div>
+        <div class="row">
+          <div class="label"><b>More variables</b><span>One <code class="inline">VICTORY_NAME=value</code> a line, set last. Every switch is described in a comment where VIctory reads it.</span></div>
+          <textarea class="text area" spellcheck="false" data-setting="customEnv" placeholder="VICTORY_WAVE_WHY=1"></textarea>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Folders</h3>
+        <div class="row">
+          <div class="label"><b>Data folder</b><span>Saves, the game's settings and crashes.log.</span><code>VICTORY_DATA_DIR</code></div>
+          <div class="folder"><span id="dataDirShow"></span><button class="btn ghost sm" data-pick="dataDir">Change</button><button class="btn ghost sm" data-reset="dataDir">Default</button></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Cache folder</b><span>Translated shaders and other derived data.</span><code>VICTORY_CACHE_DIR</code></div>
+          <div class="folder"><span id="cacheDirShow"></span><button class="btn ghost sm" data-pick="cacheDir">Change</button><button class="btn ghost sm" data-reset="cacheDir">Default</button></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Shader cache</b><span>Removes everything in the cache folder. The next start translates every shader again.</span></div>
+          <button class="btn danger-ghost" id="btnClearCache">Clear cache</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Launcher</h3>
+        <div class="row">
+          <div class="label"><b>Minimize while playing</b><span>The launcher comes back when the game ends.</span></div>
+          <label class="switch"><input type="checkbox" data-setting="minimizeOnPlay"><i></i></label>
+        </div>
+        <div class="row">
+          <div class="label"><b>Log detail</b><span>What VIctory writes to the log.</span><code>VICTORY_LOG</code></div>
+          <div class="seg" data-setting="logLevel"><button data-v="warn">Warnings</button><button data-v="info">Info</button><button data-v="debug">Debug</button></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Defaults</b><span>Puts every option above back as VIctory ships it.</span></div>
+          <button class="btn ghost" id="btnDefaults">Reset all</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= COMPATIBILITY ================= -->
+    <section class="page" id="page-compat">
+      <div class="page-head">
+        <h1>Compatibility</h1>
+        <p>What your graphics card runs, and how many of the game's shaders VIctory translates for it.</p>
+      </div>
+      <div class="card gpu-card" id="gpuCard"><div class="skeleton line"></div></div>
+
+      <div class="card">
+        <h3>Shader scan</h3>
+        <p class="muted">Translates every shader in your game folder, the way VIctory does at start, and counts what works. It does not start the game and changes nothing on disk. It takes a few minutes.</p>
+        <div class="row">
+          <div class="label"><b>Translate for</b><span>The wave sizes of the card the shaders are made for.</span><code>--host-lanes</code></div>
+          <div class="seg" id="segLanes" data-setting="scanLanes">
+            <button data-v="auto">This GPU</button><button data-v="32-32">NVIDIA (32)</button><button data-v="32-64">AMD RDNA (32-64)</button><button data-v="any">Any</button>
+          </div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Validate the output</b><span id="validatorText">Checks each translated shader with the DXIL validator.</span><code>--validate</code></div>
+          <label class="switch"><input type="checkbox" data-setting="scanValidate" id="scanValidate"><i></i></label>
+        </div>
+        <div class="scan-actions">
+          <button class="btn primary" id="btnScan">Scan shaders</button>
+          <button class="btn ghost" id="btnScanCancel" hidden>Cancel</button>
+          <span class="muted" id="scanState"></span>
+        </div>
+        <div class="bar" id="scanBar" hidden><i></i></div>
+        <div class="scan-results" id="scanResults" hidden></div>
+        <details class="raw" id="scanRawBox" hidden><summary>Full output</summary><pre id="scanRaw"></pre></details>
+      </div>
+    </section>
+
+    <!-- ================= INSIDE ================= -->
+    <section class="page" id="page-inside">
+      <div class="page-head">
+        <h1>What's inside</h1>
+        <p id="insideSub">The VIctory build this launcher carries, and what is in it.</p>
+      </div>
+      <div class="commits" id="commits"></div>
+      <div id="insideList"></div>
+    </section>
+
+    <!-- ================= LOGS ================= -->
+    <section class="page" id="page-logs">
+      <div class="page-head row-head">
+        <div><h1>Logs</h1><p>What VIctory writes while the game runs. Every session is also saved to a file.</p></div>
+      </div>
+      <div class="log-tools">
+        <input class="text search" type="search" id="logFilter" placeholder="Filter" spellcheck="false">
+        <label class="check"><input type="checkbox" id="logFollow" checked> Follow</label>
+        <label class="check"><input type="checkbox" id="logErrors"> Errors only</label>
+        <span class="grow"></span>
+        <button class="btn ghost sm" id="btnCopyLog">Copy</button>
+        <button class="btn ghost sm" id="btnSaveLog">Save…</button>
+        <button class="btn ghost sm" id="btnClearLog">Clear</button>
+        <button class="btn ghost sm" data-open="logs">Session logs</button>
+        <button class="btn ghost sm" data-open="crashes">crashes.log</button>
+        <button class="btn ghost sm" data-open="data">Data folder</button>
+      </div>
+      <div class="console" id="console"><div class="empty">Nothing yet. Start the game to see its log here.</div></div>
+    </section>
+
+    <!-- ================= ABOUT ================= -->
+    <section class="page" id="page-about">
+      <div class="about">
+        <svg class="mark big" viewBox="0 0 64 64"><use href="#logo"/></svg>
+        <h1>VIctory Launcher <span id="aboutVer"></span></h1>
+        <p class="lead">A Windows launcher for VIctory, which runs the Xbox Series X|S release of Grand Theft Auto VI natively on Windows from files you supply. This build carries avatarmanz's VIctory-7900XTX, the fastest fork, with console wave64 made exact on 32-lane GPUs (NVIDIA) on top.</p>
+        <div class="about-grid">
+          <div class="card"><h3>Credits</h3>
+            <ul class="links">
+              <li><a href="https://github.com/Marvisak/VIctory">VIctory</a><span>by Marvisak and its contributors: the base of everything here.</span></li>
+              <li><a href="https://github.com/avatarmanz/VIctory-7900XTX">VIctory-7900XTX</a><span>by avatarmanz: the fork this build is made from, and its speed.</span></li>
+              <li><a href="https://github.com/fxceless/victory-fork">fxceless/victory-fork</a><span>the fork VIctory-7900XTX started from, with DexNom's, Belobug's, ZJOU's and myokex's work in its history.</span></li>
+              <li><a href="https://github.com/Belobug/VIctory-Belobug-AMD/pull/128">Wave64 on 32-lane GPUs</a><span>the fixes added here (after PRs #68 and #128) and this launcher, by God489.</span></li>
+              <li><a href="https://developer.microsoft.com/microsoft-edge/webview2/">Microsoft Edge WebView2</a><span>draws this window.</span></li>
+            </ul>
+          </div>
+          <div class="card"><h3>License and terms</h3>
+            <p>VIctory and this launcher are free software under the <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL, version 3 or later</a>. The source of the build inside is linked on the What's inside page.</p>
+            <p><b>No game files, code or assets are included.</b> You need your own copy of the game. Not affiliated with or endorsed by the game's developer or publisher, or by Microsoft.</p>
+            <p class="muted">Not playable yet: the base reaches 13 to 22 frames per second in parts of the world on an RX 7900 XTX with 64 GB of RAM, and less in busy streets. Other machines are slower.</p>
+          </div>
+          <div class="card"><h3>Folders</h3>
+            <div class="kv" id="aboutFolders"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="drop-overlay" id="dropOverlay"><div><svg><use href="#i-folder"/></svg><b>Drop to use this game folder</b></div></div>
+<div class="modal" id="modal" hidden><div class="dialog"><h3 id="mTitle"></h3><p id="mText"></p><div class="m-actions"><button class="btn ghost" id="mNo">Cancel</button><button class="btn primary" id="mYes">OK</button></div></div></div>
+<div class="toasts" id="toasts"></div>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8B6CFF"/><stop offset="1" stop-color="#19D3FF"/></linearGradient>
+    <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#C9D6FF"/></linearGradient>
+  </defs>
+  <symbol id="logo" viewBox="0 0 64 64">
+    <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#g1)"/>
+    <rect x="2.5" y="2.5" width="59" height="59" rx="15.5" fill="none" stroke="rgba(255,255,255,.35)"/>
+    <path d="M15 17h9.5L32 38.5 39.5 17H49L36.4 49h-8.8z" fill="url(#g2)"/>
+    <path d="M44 17h5l-2.2 5.6h-4.9z" fill="#fff" opacity=".55"/>
+  </symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  <symbol id="i-play-fill" viewBox="0 0 24 24"><path d="M7.5 4.8v14.4c0 .8.9 1.3 1.6.9l11.5-7.2c.6-.4.6-1.4 0-1.8L9.1 3.9c-.7-.4-1.6.1-1.6.9z" fill="currentColor"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></g></symbol>
+  <symbol id="i-chip" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="6" y="6" width="12" height="12" rx="2.5"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/></g></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></g></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="3"/><path d="M7.5 10l3 2.5-3 2.5M13 15h4"/></g></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.1"/></g></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5c0-1.1.9-2 2-2h4l2 2h7c1.1 0 2 .9 2 2v7.5c0 1.1-.9 2-2 2h-13c-1.1 0-2-.9-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.4-3.1 8.2-7.5 9.5-4.4-1.3-7.5-5.1-7.5-9.5V6z"/><path d="M8.8 12.2l2.3 2.3 4.3-4.6"/></g></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3.5-3.5M20 16H7l3.5 3.5"/></g></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></g></symbol>
+</svg>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,115 +1,128 @@
-# VIctory on an RX 7900 XTX
+# VIctory Launcher
 
-A fork of [VIctory](https://github.com/Marvisak/VIctory), a compatibility layer
-that runs an Xbox Series title natively on Windows from files the user supplies.
-This one is about **speed on AMD RDNA 3**: the world at 30 frames a second on
-one PC, without giving up the picture. It is not there yet.
+A Windows launcher, and the VIctory build inside it, for running the Xbox Series X|S
+release of Grand Theft Auto VI natively on Windows from your own copy of the game.
 
-**This repository contains no game files, code or assets.** You need your own
-copy of the game. It is not affiliated with or endorsed by the game's developer
-or publisher.
+**Download:** `VIctoryLauncher.exe` on the [Releases](https://github.com/God489/VIctory-Launcher/releases)
+page: one file, nothing to install.
 
-## Where it stands (2026-11-25)
+**This repository contains no game files, code or assets.** You need your own copy of
+the game. It is not affiliated with or endorsed by the game's developer or publisher, or
+by Microsoft. **Not playable yet** on most machines: see "Where it stands".
 
-Tested on one machine only: Windows 11, Intel i9-12900K, 64 GB RAM, Radeon
-RX 7900 XTX, 1440p, the Series X profile.
+## What is in it
 
-| | |
-|---|---|
-| Menus, videos, loading screens | 30 fps |
-| Prologue, indoors | 50-75 ms a frame (13-20 fps) |
-| First mission with the boat | 46-53 ms (19-22 fps) |
-| Street chase with many cars and people | 100-165 ms (6-10 fps), single frames far longer |
-| Outdoors on foot, the camp | 60-90 ms |
-| Flying | 42-57 ms |
-| Longest session so far | 41 minutes, no crash |
-| Memory | 40-46 GB of private memory: **64 GB of RAM recommended** |
+1. **The fastest VIctory fork, as its base:** [avatarmanz/VIctory-7900XTX](https://github.com/avatarmanz/VIctory-7900XTX)
+   (`0a43566`), with its whole history. On an RX 7900 XTX it went from 280 ms a frame to
+   46-65 ms in the same scenes of the prologue (13-22 fps indoors and on the water), by
+   doing on threads of its own, on the card, and later what the title's threads waited for.
+   Its README and findings: [docs/README-7900XTX.md](docs/README-7900XTX.md),
+   [docs/findings.md](docs/findings.md).
+2. **Console wave64 made exact on 32-lane GPUs (NVIDIA)**, `e630b18`: the fixes below,
+   from the work of [Belobug/VIctory-Belobug-AMD #68 and #128](https://github.com/Belobug/VIctory-Belobug-AMD/pull/128).
+3. **The launcher** ([launcher/](launcher/)): a window for all of it.
 
-It started at 280 ms a frame in the same scenes two days earlier.
+### The fixes, and how they are known to work
 
-What is known to be wrong:
+The console runs most of the title's compute programs in waves of 64 lanes; NVIDIA runs
+waves of 32, so each console wave runs as two halves. `emit::console_wave_tests` runs 29
+cases (programs and the values the console gives, from #68 and #128) through the whole
+translation, fallbacks included, and on the GPU, lane by lane. On an RTX 3050:
 
-- Trees, plants and far buildings flicker outdoors in some places.
-- Rooms with little direct light are too dark without `-RayTracing`.
-- Textures of what just came into view appear late while the title streams.
-- The first run with a new driver or a new build stutters while the driver makes
-  pipelines (`victory warm` makes them ahead).
-- Recording a frame in the world makes the title's own watchdog end it.
+| | `0a43566` (the base) | this |
+|---|---|---|
+| cases with the console's values | 8 of 29 | **29 of 29** |
+| the base's own tests | 916 passed | 916 passed, + 2 new |
 
-## How to run it
+What was wrong, each now covered by those cases:
 
-You need Windows 10/11 x64, a CPU with AVX2, a Direct3D 12 GPU with shader
-model 6.6 and mesh shaders, Rust (the toolchain is pinned), the MSVC build
-tools, and your own dump of the title.
+- **`ds_bpermute_b32` / `ds_permute_b32`.** AMD's RDNA ISA (10.4.4) runs them within each
+  32-lane half of a wave64, "as if were two independent wave32's". `ds_bpermute` read
+  across halves on 64-lane hosts and was refused on NVIDIA: the title's checkerboard
+  shadow-mask generators, without which every shadowed light was multiplied by an empty
+  mask. `ds_permute` was not translated on any host. Both now read within the half, and a
+  lane that does not run the instruction gives 0; their programs split into two waves of
+  32 on NVIDIA.
+- **Groups that are not a multiple of 32 threads** (48, 80, 112): the one short host wave
+  could take the group's first console threads and leave the rest of that run to no
+  thread (a group of 80 counted 24 lanes of 40). It takes the group's last run now.
+- **Scalars after a divergent loop or branch.** The console runs a loop until its last lane
+  leaves, and each path some lane takes, with one set of scalar registers. Each lane read
+  its own path's values (1, 2, 3 ... where the console gives 64). Now every lane reads what
+  the wave's last iteration or path left (upstream VIctory `b67d15d`, TheHoracio, which the
+  7900XTX line never had), combined over both halves on NVIDIA.
+- **No group barrier inside a divergent loop.** The blocks of a loop that lanes leave at
+  different times were counted as blocks every lane runs (a block post-dominates itself),
+  so an exchange between the halves could put a barrier there.
+- **A mask operation's SCC read as a number** (`WaveActiveAnyTrue` choosing a value) is the
+  console wave's; a mask grown inside a branch translates on 64-lane GPUs. Waterfall loops
+  are unchanged (no wave operations).
+
+Not exact yet: a loop's exit mask counted after the loop
+(`console_wave64_programs_not_yet_exact`, ignored).
+
+### The launcher
+
+- **Play:** drop the game folder on the window, or browse to it. It reads
+  `MicrosoftGame.config`, checks for `appdata0.rpf`, and runs `victory run <exe> --execute`
+  with the settings the base is played and measured with (its `scripts/play.ps1`): Fast,
+  or Safe. Time, fps and frame time live from VIctory's caption; Stop ends every process
+  VIctory started (a job object).
+- **Before the first run:** Prepare shaders (`victory shaders`) and Warm pipelines
+  (`victory warm --used`).
+- **This PC:** AVX2, the GPU VIctory will use with its D3D12 wave lanes, shader model and
+  mesh shader tier, RAM and free commit.
+- **Settings:** each one names the variable it sets: mode, ray-traced light
+  (`VICTORY_BVH_BUILDER`), the light estimate (`VICTORY_AMBIENT`), texture read-back, the
+  performance panel (F3), the pipeline book, console model, and any other `VICTORY_*`.
+- **Compatibility:** how many of your game's shaders translate for your GPU
+  (`victory translate`).
+- **Logs:** live, filtered and saved per session; `crashes.log` one click away.
+
+## Where it stands
+
+From the base's measurements (one PC: i9-12900K, 64 GB, RX 7900 XTX, 1440p): menus 30 fps;
+the prologue indoors 13-20 fps; the first boat mission 19-22 fps; a street chase 6-10 fps;
+40-46 GB of private memory, so **64 GB of RAM is recommended**. NVIDIA cards had not been
+measured in the world with this; the fixes above make the console's wave64 programs give
+the console's values there.
+
+## Requirements
+
+Windows 10/11 x64, a CPU with AVX2, a Direct3D 12 GPU with shader model 6.6 and mesh
+shaders, the Microsoft Edge WebView2 Runtime (part of Windows 11), your own dump of the
+title, and memory as above.
+
+## Build
 
 ```powershell
-git clone https://github.com/avatarmanz/VIctory-7900XTX
-cd VIctory-7900XTX
-copy victory.example.toml victory.toml      # then set your paths, outside this folder
-cargo build --locked --profile diag -p victory --features diagnostics
-scripts\play.ps1 -Exe <path of your copy's executable>
+cargo build --locked --profile diag -p victory --features diagnostics   # target\diag\victory.exe
+launcher\build.ps1                                                     # launcher\build\VIctoryLauncher.exe
+cargo test --workspace --no-fail-fast                                  # no game data needed
 ```
 
-`scripts\play.ps1 -Safe` leaves out the newest, faster ways; try it first when
-something is wrong. `-RayTracing` turns the title's ray-traced indirect light on.
-
-Before the first run, ahead of time (both can be stopped and go on later):
-
-```powershell
-target\diag\victory.exe shaders <the shader archives>   # every shader translated, minutes
-target\diag\victory.exe warm --used                     # pipelines earlier runs drew with, for a new driver or build
-```
-
-Commands, debugging switches and upstream's own description:
-[docs/README-fxceless.md](docs/README-fxceless.md). Every `VICTORY_...` switch is
-described in a comment where it is read.
-
-## What is different here
-
-In short; the reasons and the measurements are in [docs/findings.md](docs/findings.md).
-
-- **List calls are written down, not carried out, on the title's threads**
-  (`VICTORY_THIN`): eight threads of ours translate them.
-- **Submissions are prepared by a thread of ours and joined**
-  (`VICTORY_ASYNC_SUBMIT`, `VICTORY_JOIN_PARTS`), with what can be spread over
-  threads spread: refreshes, compares (AVX2), descriptor records, landings.
-- **What shaders wrote comes back beside the write guards**, by the dwords that
-  changed, on a thread of its own (`VICTORY_RELAY`, `VICTORY_LAND`).
-- **Buffer fills that need bytes still on the card are done on the card**
-  (`VICTORY_CARD_STEPS`) instead of waiting for it.
-- **The title's writes are caught more cheaply**: one view opened at a fault,
-  blocks that rest, places in the title's code that look before they write.
-- **Textures go up on a copy queue of their own** and a slot shows one only after
-  its upload ran, which also ended a device loss that came every 15 minutes or so.
-- **Boats float**: textures that shaders write and the title's CPU reads go back
-  to title memory (from fxceless and Geckomacabre, on by default here).
-- **Frame record and replay** with per-pass times and shader variants compared
-  turn by turn ([docs/replay.md](docs/replay.md)).
+The launcher compiles with the .NET Framework 4.8 C# compiler that ships with Windows.
+Its build fetches Microsoft's WebView2 package (1.0.4370.26) from nuget.org once and checks
+its DLLs against pinned SHA-256 hashes: the repository holds no binaries
+([docs/asset-policy.md](docs/asset-policy.md)).
 
 ## Credits
 
-This is a tree of other people's work with more on top. The history is kept, and
-commits taken from elsewhere name the commit and its author.
-
-- **[VIctory](https://github.com/Marvisak/VIctory)** by Marvisak and its
-  contributors: the loader, the runtime services, the Direct3D 12 back end and
-  the shader recompiler.
-- **[fxceless/victory-fork](https://github.com/fxceless/victory-fork)**: the fork
-  this one started from, and the people whose pull requests it carries.
-- **[DexNom/VIctory](https://github.com/DexNom/VIctory)**: ray tracing fixes,
-  cube gradients, sparse textures.
-- **[Belobug/VIctory-Belobug-AMD](https://github.com/Belobug/VIctory-Belobug-AMD)**:
-  the ambient light idea, pipeline workers, and work by romainhedouin.
-- **[FQY55kai/ZJOU-VICTORY](https://github.com/FQY55kai/ZJOU-VICTORY)**.
-- **[myokex/victory-amd](https://github.com/myokex/victory-amd)**: the guard over
-  every view of a page (with Spexivus, joroyt and tightfall), and Joshua Odom's
-  reads into title memory.
-- **Geckomacabre** and **cxy0072019-sketch**: the texture read-back.
-- **[XCL](https://github.com/ivall/xcl)** (GPL-2.0-only) was read for how the same
-  title behaves under another layer; no code of it is here.
-- This fork's changes were made with [Claude Code](https://claude.com/claude-code).
+- **[VIctory](https://github.com/Marvisak/VIctory)** by Marvisak and its contributors.
+- **[avatarmanz/VIctory-7900XTX](https://github.com/avatarmanz/VIctory-7900XTX)**: the base,
+  and the speed. Its credits, kept in its history and README:
+  [fxceless/victory-fork](https://github.com/fxceless/victory-fork),
+  [DexNom/VIctory](https://github.com/DexNom/VIctory),
+  [Belobug/VIctory-Belobug-AMD](https://github.com/Belobug/VIctory-Belobug-AMD) and
+  romainhedouin, [FQY55kai/ZJOU-VICTORY](https://github.com/FQY55kai/ZJOU-VICTORY),
+  [myokex/victory-amd](https://github.com/myokex/victory-amd) (with Spexivus, joroyt,
+  tightfall and Joshua Odom), Geckomacabre and cxy0072019-sketch.
+- **TheHoracio**: the scalars after divergent loops and branches (upstream `b67d15d`).
+- **God489**: the fixes of `e630b18` and the launcher. Made with
+  [Claude Code](https://claude.com/claude-code).
+- **Microsoft Edge WebView2** draws the launcher's window.
 
 ## License
 
-GPL-3.0-or-later, as VIctory. See [LICENSE](LICENSE); the one file that is not
-covered is named in [docs/asset-policy.md](docs/asset-policy.md).
+GPL-3.0-or-later, as VIctory. See [LICENSE](LICENSE); the one file that is not covered is
+named in [docs/asset-policy.md](docs/asset-policy.md).
