@@ -5507,14 +5507,30 @@ pub(crate) fn by_address(start: u64, len: u64) -> Option<Arc<Shadow>> {
 }
 
 /// The most an ask without a length (a root view) is given past its 4 MiB
-/// cell, in bytes: `VICTORY_ROOT_WINDOW_MB` (32; 4 = the cell alone, as
-/// before), in whole cells.
+/// cell, in bytes: `VICTORY_ROOT_WINDOW_MB` (4 = the cell alone, as
+/// before), in whole cells; without it [`root_window_default_mb`].
 fn root_window_most() -> u64 {
     static MOST: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
     *MOST.get_or_init(|| {
-        let mb = std::env::var("VICTORY_ROOT_WINDOW_MB").ok().and_then(|v| v.trim().parse::<u64>().ok());
-        (mb.unwrap_or(32).clamp(4, 256) << 20) / WINDOW * WINDOW
+        let asked = std::env::var("VICTORY_ROOT_WINDOW_MB").ok().and_then(|v| v.trim().parse::<u64>().ok());
+        let shared_budget = crate::host::host().and_then(|h| h.video_memory()).map(|[_, _, budget, _]| budget);
+        let mb = asked.unwrap_or_else(|| root_window_default_mb(shared_budget));
+        tracing::info!(mb, shared_budget_mb = shared_budget.map(|b| b >> 20), "root views' windows reach at most");
+        (mb.clamp(4, 256) << 20) / WINDOW * WINDOW
     })
+}
+
+/// 32 MiB where the PC's memory shared with the card has a budget of
+/// 12 GiB or more (some 24 GB of RAM and up), else 4, the cell alone, as
+/// before the reach: every window is a copy in that memory, and the title
+/// asks for hundreds at the world's first frame. On an RTX 3050 with 16 GB
+/// of RAM (budget 7,405 MB) the windows of 32 MiB met the budget within
+/// 10 s and the run ended: E_OUTOFMEMORY at a list's close, the device
+/// removed, or the driver faulting (runs B-new-warm to E2-inplace, 5 of 6);
+/// the build before the reach went to 6,879 MB and ran on. Unknown (no
+/// host, as in tests): 32.
+fn root_window_default_mb(shared_budget: Option<u64>) -> u64 {
+    if shared_budget.is_some_and(|b| b < 12 << 30) { 4 } else { 32 }
 }
 
 /// The window of an ask without a length at `[address, end)`: its 4 MiB
@@ -5530,8 +5546,12 @@ fn root_window_most() -> u64 {
 /// staging had held, and the device was removed. The memory the title
 /// committed around the view is what it can be reading.
 fn root_window(address: u64, end: u64) -> (u64, u64) {
+    root_window_reaching(address, end, root_window_most())
+}
+
+/// [`root_window`] with at most `most` bytes.
+fn root_window_reaching(address: u64, end: u64, most: u64) -> (u64, u64) {
     let (cell, len) = window_of(address, end, WINDOW);
-    let most = root_window_most();
     if most <= len {
         return (cell, len);
     }
@@ -6013,13 +6033,25 @@ mod window_tests {
         cell
     }
 
+    /// The reach is 32 MiB where the memory shared with the card has a
+    /// budget of 12 GiB or more or none is known, the cell alone under it.
+    #[test]
+    fn a_root_view_reaches_far_only_where_shared_memory_has_room() {
+        const GIB: u64 = 1 << 30;
+        assert_eq!(super::root_window_default_mb(Some(7405 << 20)), 4);
+        assert_eq!(super::root_window_default_mb(Some(12 * GIB - 1)), 4);
+        assert_eq!(super::root_window_default_mb(Some(12 * GIB)), 32);
+        assert_eq!(super::root_window_default_mb(Some(16 * GIB)), 32);
+        assert_eq!(super::root_window_default_mb(None), 32);
+    }
+
     /// A root view into 12 MiB of committed memory is given a window over
     /// all of it, not its 4 MiB cell alone (`VICTORY_ROOT_WINDOW_MB=4`: the
     /// cell, as before).
     #[test]
     fn a_root_view_window_covers_the_memory_committed_after_its_cell() {
         let cell = committed_cell(12 << 20);
-        assert_eq!(super::root_window(cell + 0x100, cell + 0x104), (cell, 12 << 20), "the root view's window is its cell alone");
+        assert_eq!(super::root_window_reaching(cell + 0x100, cell + 0x104, 32 << 20), (cell, 12 << 20), "the root view's window is its cell alone");
     }
 
     /// What was found committed around a root view is used again within
@@ -6028,10 +6060,10 @@ mod window_tests {
     fn a_root_view_reach_is_used_again_within_its_time() {
         use windows_sys::Win32::System::Memory::{MEM_DECOMMIT, VirtualFree};
         let cell = committed_cell(12 << 20);
-        assert_eq!(super::root_window(cell, cell + 4), (cell, 12 << 20));
+        assert_eq!(super::root_window_reaching(cell, cell + 4, 32 << 20), (cell, 12 << 20));
         // SAFETY: the upper 8 MiB of our own commitment, nothing reads it.
         assert_ne!(unsafe { VirtualFree((cell + WINDOW) as *mut _, (8 << 20) as usize, MEM_DECOMMIT) }, 0);
-        assert_eq!(super::root_window(cell, cell + 4), (cell, 12 << 20), "the reach was asked of Windows again");
+        assert_eq!(super::root_window_reaching(cell, cell + 4, 32 << 20), (cell, 12 << 20), "the reach was asked of Windows again");
     }
 }
 

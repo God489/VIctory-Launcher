@@ -1755,7 +1755,8 @@ pub(crate) fn room(memory: Option<[u64; 4]>) -> bool {
 }
 
 /// Whether the PC's memory shared with the card is too full for another
-/// texture: at [`shared_room_percent`] of the system's budget for it. What
+/// texture: at [`shared_room_percent`] of the system's budget for it, a
+/// brake at the brink (a run that lives goes to 86-93 %). What
 /// the card has no room for, the system moves there, and the host copies of
 /// title memory live there (`Host::shared_buffer`). On an RTX 3050 (8 GB)
 /// with 16 GB of RAM that budget (7,405 MB) is the one met first: the
@@ -1767,8 +1768,11 @@ fn shared_full(budget: u64, used: u64) -> bool {
     budget != 0 && used >= budget / 100 * shared_room_percent()
 }
 
-/// `VICTORY_SHARED_ROOM_PERCENT` (50 to 99, 85): how full the PC's memory
-/// shared with the card may be before the texture queue makes no more.
+/// `VICTORY_SHARED_ROOM_PERCENT` (50 to 99, 95): how full the PC's memory
+/// shared with the card may be before the texture queue makes no more. At
+/// 85 it held textures back for most of a scene that ran on at 86 % (run
+/// E3-root4: 8,008 title textures without a host copy, 5,467 in run
+/// A-good).
 #[cfg(windows)]
 fn shared_room_percent() -> u64 {
     static PERCENT: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
@@ -1776,7 +1780,7 @@ fn shared_room_percent() -> u64 {
         std::env::var("VICTORY_SHARED_ROOM_PERCENT")
             .ok()
             .and_then(|v| v.trim().parse::<u64>().ok())
-            .map_or(85, |percent| percent.clamp(50, 99))
+            .map_or(95, |percent| percent.clamp(50, 99))
     })
 }
 
@@ -3384,15 +3388,16 @@ mod tests {
     use super::*;
     use crate::object::slot;
 
-    /// The texture queue stops at 85 % of the PC's memory shared with the
+    /// The texture queue stops at 95 % of the PC's memory shared with the
     /// card (run D-new-gpu's budget: 7,405 MB), and a budget the system did
     /// not give stops nothing.
     #[cfg(windows)]
     #[test]
     fn the_texture_queue_stops_short_of_the_shared_budget() {
         const MB: u64 = 1 << 20;
-        assert!(!shared_full(7405 * MB, 6100 * MB));
-        assert!(shared_full(7405 * MB, 6300 * MB));
+        assert!(!shared_full(7405 * MB, 6445 * MB));
+        assert!(!shared_full(7405 * MB, 6879 * MB));
+        assert!(shared_full(7405 * MB, 7040 * MB));
         assert!(shared_full(7405 * MB, 7397 * MB));
         assert!(!shared_full(0, 7397 * MB));
     }
