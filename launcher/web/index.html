@@ -77,7 +77,7 @@
                 <button class="btn danger" id="btnStop">Stop</button>
               </div>
               <div class="seg" id="segConsole" data-setting="console">
-                <button data-v="auto" title="Series S on a PC with less than 48 GB of RAM">Auto</button>
+                <button data-v="auto" title="Series S on a card under 12 GB or with limited memory, Series X else">Auto</button>
                 <button data-v="series-x">Series X</button>
                 <button data-v="series-s">Series S</button>
               </div>
@@ -97,6 +97,34 @@
       </div>
 
       <div class="verify" id="verifyBox" hidden></div>
+
+      <div class="card" id="liveCard" hidden>
+        <h3>Live</h3>
+        <p class="muted">Changes the running game at once, without a restart: the light while you look at a scene, any switch VIctory reads while it runs. The numbers are the game's own, a second at a time.</p>
+        <div class="vgrid">
+          <div><b id="lvMedian">—</b><span>ms a frame (median)</span></div>
+          <div><b id="lvFps">—</b><span>fps</span></div>
+          <div><b id="lvP90">—</b><span>ms, 9 frames in 10 under</span></div>
+          <div><b id="lvDraws">—</b><span>draws a frame</span></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Light in shadowed places</b><span>The level, and Even or Estimate, as in Settings; Settings keeps it for the next run.</span><code>VICTORY_AMBIENT</code></div>
+          <div class="range"><input type="range" min="0.1" max="2.5" step="0.05" id="lvLight"><output id="lvLightOut"></output></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Light kind</b><span>Even keeps the level everywhere; Estimate follows the light around.</span><code>constant:</code></div>
+          <div class="seg" id="lvKind"><button data-v="constant">Even</button><button data-v="estimate">Estimate</button></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Light in the air</b><span>How much the air scatters, as a multiple of the light around (0: the title's own).</span><code>VICTORY_AMBIENT_AIR</code></div>
+          <div class="range"><input type="range" min="0" max="4" step="0.1" id="lvAir"><output id="lvAirOut"></output></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>More</b><span>One VICTORY_NAME=value a line, for the switches VIctory reads while it runs.</span><code>set</code></div>
+          <textarea class="text area" id="lvMore" spellcheck="false" placeholder="VICTORY_CACHE_CORES=0"></textarea>
+        </div>
+        <div class="scan-actions"><button class="btn ghost sm" id="lvKeep">Keep the light in Settings</button><span class="muted" id="lvSaid"></span></div>
+      </div>
 
       <h2 class="section">Before the first run</h2>
       <div class="tools">
@@ -131,8 +159,12 @@
       <div class="card">
         <h3>Console</h3>
         <div class="row">
-          <div class="label"><b>Console model</b><span>The device type and memory the title sees. Auto picks Series S with the limited memory profile (less memory, smaller targets), Series X otherwise.</span><code>--console</code></div>
+          <div class="label"><b>Console model</b><span>The device type and memory the title sees. Series X draws the faces that Series S leaves out (eyes and teeth only: codec_d/cool_fox, RTX 4060), but it needs more memory: on an 8 GB card with 16 GB of RAM it filled the card and the game ended with an out-of-memory error. Auto is Series S on a card under 12 GB or with limited memory, Series X else.</span><code>--console</code></div>
           <div class="seg" data-setting="console"><button data-v="auto">Auto</button><button data-v="series-x">Series X</button><button data-v="series-s">Series S</button></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Output size</b><span id="outputText">The size the game renders for (Series X; it renders at 2/3 of it and upscales). Auto is 1920x1080 on a card under 12 GB of video memory, where 4K asks for more than it has (the 7900XTX fork measured about 16 ms less card time a frame at 1080p), and the game's own 4K otherwise.</span><code>VICTORY_OUTPUT</code></div>
+          <div class="seg" data-setting="output"><button data-v="auto">Auto</button><button data-v="1664x936">936p</button><button data-v="1920x1080">1080p</button><button data-v="2560x1440">1440p</button><button data-v="native">4K</button></div>
         </div>
         <div class="row">
           <div class="label"><b>Memory profile</b><span id="memoryText">Limited is what codec_d/cool_fox runs with on an RTX 5090 with 32 GB of RAM: textures' levels made on demand, every title buffer copied into the card's memory, the air's light raised, Series S. Standard is the 7900XTX fork's, for 64 GB. Auto picks Limited under 48 GB of RAM.</span><code>VICTORY_LEVELS_ON_DEMAND · VICTORY_CARD_BUFFERS_MIN_KB · VICTORY_AMBIENT_AIR</code></div>
@@ -143,8 +175,24 @@
       <div class="card">
         <h3>Speed</h3>
         <div class="row">
-          <div class="label"><b>Mode</b><span>Fast is how the 7900XTX fork is played and measured: list calls written down and translated by eight threads, submissions joined, textures sent ahead. Safe leaves the newest of these out: the first thing to try when something is wrong.</span><code>VICTORY_THIN · VICTORY_JOIN_PARTS · VICTORY_UPLOAD_AHEAD</code></div>
-          <div class="seg" data-setting="mode"><button data-v="fast">Fast</button><button data-v="safe">Safe</button></div>
+          <div class="label"><b>Mode</b><span>Quality draws what the console draws: the title's list calls carried out on its own threads, no joined submissions. Fast is how the 7900XTX fork is played and measured (list calls translated by eight threads, submissions joined), faster, but codec_d/cool_fox found on an RTX 4060 that the heads of people in play then do not draw and the opening video repeats frames. Safe leaves out the newest paths as well.</span><code>VICTORY_THIN · VICTORY_JOIN_PARTS · VICTORY_UPLOAD_AHEAD</code></div>
+          <div class="seg" data-setting="mode"><button data-v="quality">Quality</button><button data-v="fast">Fast</button><button data-v="safe">Safe</button></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Renderer patches</b><span>The 7900XTX fork's renderer ports: the title's constants and constant buffers read by the card where the title writes them, instead of copied at every submission. RTX-tested is ports 1 and 5, as codec_d/cool_fox runs them on NVIDIA; All adds 2, 6 and 7 (avatarmanz: 57-75 ms a frame to 44.9 ms on an RX 7900 XTX).</span><code>VICTORY_PORT_CONSTANTS · VICTORY_PORT_CBV · VICTORY_PORT_DESCRIPTORS · VICTORY_PORT_GUARD · VICTORY_PORT_JOURNAL</code></div>
+          <div class="seg" data-setting="patches"><button data-v="rtx">RTX-tested</button><button data-v="all">All</button><button data-v="off">Off</button></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Texture checks</b><span id="textureCheckText">Exact hashes every texture the title may have written at each check. The fast write guard misses some of the title's writes, and skin and a phone's frame then show colour noise (codec_d/cool_fox); exact costs CPU time.</span><code>VICTORY_TEXTURE_GUARD</code></div>
+          <div class="seg" data-setting="textureCheck"><button data-v="exact">Exact</button><button data-v="guard">Fast</button></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Wave64 last resort</b><span>A console wave64 program that no other form translates for a 32-lane card (four in the opening cutscene on NVIDIA) takes its per-lane branches by the whole wave at once, with group barriers, instead of the game going without it. Only those programs: every other one keeps its form.</span><code>VICTORY_WAVE_LAST_RESORT</code></div>
+          <div class="seg" data-setting="lastResort"><button data-v="on">On</button><button data-v="off">Off</button></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>60 fps cap</b><span>The title caps itself at 30 frames a second; this moves its cap and VIctory's clock to 60 (menus and videos reach it; the game's clock stays right).</span><code>VICTORY_FRAME_INTERVAL_MS</code></div>
+          <label class="switch"><input type="checkbox" data-setting="fps60"><i></i></label>
         </div>
         <div class="row">
           <div class="label"><b>Performance panel</b><span>Numbers of where a frame goes, on the picture. F3 shows and hides it. It costs a little, so it is off by default.</span><code>VICTORY_PANEL</code></div>
@@ -163,8 +211,12 @@
           <label class="switch"><input type="checkbox" data-setting="rayTracing"><i></i></label>
         </div>
         <div class="row">
-          <div class="label"><b>Light in shadowed places</b><span>Without ray tracing, an estimate of the light around stands in for the indirect light (0.8 as played). Off leaves what the title's resolve pass wrote.</span><code>VICTORY_AMBIENT</code></div>
+          <div class="label"><b>Light in shadowed places</b><span>Without ray tracing, light stands in for the title's indirect light at this level (0.8 as played). Off leaves what the title's resolve pass wrote.</span><code>VICTORY_AMBIENT</code></div>
           <div class="range"><label class="switch sm"><input type="checkbox" id="ambientOn"><i></i></label><input type="range" min="0.1" max="1.5" step="0.05" id="ambientLevel"><output id="ambientOut"></output></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Light kind</b><span>Even keeps that level everywhere (codec_d/cool_fox: an estimate that follows the frame's light washed a whole room out from a bright doorway). Estimate follows the light around, as the 7900XTX fork plays.</span><code>VICTORY_AMBIENT=constant:</code></div>
+          <div class="seg" data-setting="ambientMode"><button data-v="constant">Even</button><button data-v="estimate">Estimate</button></div>
         </div>
         <div class="row">
           <div class="label"><b>Texture read-back</b><span>Textures that shaders write and the title's CPU reads go back to its memory: the sea's height for boats (on by default; off, boats sink).</span><code>VICTORY_TEXTURE_BACK</code></div>
@@ -232,6 +284,16 @@
         <p>What your graphics card runs, and how many of the game's shaders VIctory translates for it.</p>
       </div>
       <div class="card gpu-card" id="gpuCard"><div class="skeleton line"></div></div>
+
+      <div class="card">
+        <h3>Test run</h3>
+        <p class="muted">Plays the game with your current settings until the opening's first busy scene (3,000 draws a frame or more), takes a picture of it, measures its frame times for a minute and stops the game. Each run is kept, so settings can be compared on this PC: change one, run again.</p>
+        <div class="scan-actions">
+          <button class="btn primary" id="btnTest">Run the test</button>
+          <span class="muted" id="testStatus"></span>
+        </div>
+        <div id="testResults"></div>
+      </div>
 
       <div class="card">
         <h3>Shader scan</h3>

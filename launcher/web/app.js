@@ -40,7 +40,7 @@ const send = (cmd, args) => call(cmd, args).catch(e => toast(e.message, 'bad'));
 
 // ---------------- state ----------------
 const DEFAULTS = {
-  console: 'auto', memory: 'auto', mode: 'fast', panel: false, pipelineBook: 'on', rayTracing: false,
+  console: 'auto', memory: 'auto', mode: 'fast', ambientMode: 'estimate', patches: 'rtx', output: 'auto', textureCheck: 'exact', lastResort: 'on', fps60: false, panel: false, pipelineBook: 'on', rayTracing: false,
   ambient: '0.8', textureBack: 'on', unimplemented: 'trap', strict: false, titleArgs: '', customEnv: '',
   dataDir: '', cacheDir: '', minimizeOnPlay: false, logLevel: 'info',
   scanLanes: 'auto', scanValidate: true, firstRunSeen: false,
@@ -88,6 +88,7 @@ function go(page) {
   $$('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + page));
   $('#crumb').textContent = TITLES[page];
   if (page === 'logs') { unread = 0; $('#logBadge').hidden = true; scrollLog(true); }
+  if (page === 'compat') loadTests();
 }
 $$('#nav button').forEach(b => b.onclick = () => go(b.dataset.page));
 $('#btnMin').onclick = () => send('minimize');
@@ -222,6 +223,9 @@ function applyState(st) {
   if (st && st.started) S.started = st.started;
   $('#btnPlay').hidden = S.running;
   $('#runningBox').hidden = !S.running;
+  const wasLive = !$('#liveCard').hidden;
+  $('#liveCard').hidden = !S.running;
+  if (S.running && !wasLive) liveInit();
   $('#segConsole').hidden = S.running;
   $('#btnChange').hidden = S.running;
   const pill = $('#runPill');
@@ -317,8 +321,8 @@ function syncControls() {
   $('#validatorText').textContent = hasValidator ? 'Checks each translated shader with ' + S.info.validator : 'Needs dxil.dll from the Windows SDK, which is not installed: shaders are translated only.';
   // what Auto picks on this PC (the launcher decides the same way: under 48 GB, Limited)
   const ram = S.system && S.system.ramTotal;
-  const base = 'Limited is what codec_d/cool_fox runs with on an RTX 5090 with 32 GB of RAM: textures\' levels made on demand, every title buffer copied into the card\'s memory, the air\'s light raised, Series S. Standard is the 7900XTX fork\'s, for 64 GB. Auto picks Limited under 48 GB of RAM.';
-  $('#memoryText').textContent = ram ? `${base} This PC: ${fmtGB(ram)}, so Auto is ${ram < 48 * 1073741824 ? 'Limited, Series S' : 'Standard, Series X'}.` : base;
+  const base = 'Limited is what codec_d/cool_fox runs with on an RTX 5090 with 32 GB of RAM: textures\' levels made on demand, every title buffer copied into the card\'s memory, the air\'s light raised, residency budgets. Standard is the 7900XTX fork\'s, for 64 GB. Auto picks Limited under 48 GB of RAM.';
+  $('#memoryText').textContent = ram ? `${base} This PC: ${fmtGB(ram)}, so Auto is ${ram < 48 * 1073741824 ? 'Limited' : 'Standard'}.` : base;
 }
 $$('.seg[data-setting]').forEach(seg => seg.addEventListener('click', e => {
   const b = e.target.closest('button');
@@ -407,6 +411,100 @@ $('#btnScan').onclick = async () => {
   } catch (e) { toast(e.message, 'bad'); }
 };
 $('#btnScanCancel').onclick = () => send('cancelScan');
+// ---------------- live ----------------
+const LV = { light: null, kind: null, air: null };
+function liveInit() {
+  const amb = String(get('ambient'));
+  const level = amb === 'off' ? AMBIENT : parseFloat(amb.replace('constant:', '')) || AMBIENT;
+  const limited = get('memory') === 'limited' || (get('memory') !== 'standard' && S.system && S.system.ramTotal < 48 * 1073741824);
+  LV.light = level; LV.kind = get('ambientMode') || 'constant'; LV.air = limited ? 1.5 : 0;
+  $('#lvLight').value = LV.light; $('#lvAir').value = LV.air; $('#lvMore').value = '';
+  liveShow();
+}
+function liveShow() {
+  $('#lvLightOut').textContent = Number(LV.light).toFixed(2);
+  $('#lvAirOut').textContent = Number(LV.air) > 0 ? Number(LV.air).toFixed(1) : 'title';
+  $$('#lvKind button').forEach(b => b.classList.toggle('on', b.dataset.v === LV.kind));
+}
+let liveTimer = 0;
+function liveSend() {
+  liveShow();
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(async () => {
+    const lines = [`set VICTORY_AMBIENT=${LV.kind === 'constant' ? 'constant:' : ''}${Number(LV.light).toFixed(2)}`];
+    if (Number(LV.air) > 0) lines.push(`set VICTORY_AMBIENT_AIR=${Number(LV.air).toFixed(1)}`);
+    $('#lvMore').value.split('\n').map(l => l.trim()).filter(l => /^VICTORY_[A-Z0-9_]+\s*=/.test(l)).forEach(l => lines.push('set ' + l));
+    try { await call('liveSet', { text: lines.join('\n') }); $('#lvSaid').textContent = 'Sent: ' + lines.length + ' value' + (lines.length === 1 ? '' : 's'); }
+    catch (e) { $('#lvSaid').textContent = e.message; }
+  }, 150);
+}
+$('#lvLight').addEventListener('input', e => { LV.light = parseFloat(e.target.value); liveSend(); });
+$('#lvAir').addEventListener('input', e => { LV.air = parseFloat(e.target.value); liveSend(); });
+$$('#lvKind button').forEach(b => b.onclick = () => { LV.kind = b.dataset.v; liveSend(); });
+$('#lvMore').addEventListener('change', liveSend);
+$('#lvKeep').onclick = () => { set('ambient', Number(LV.light).toFixed(2)); set('ambientMode', LV.kind); toast('The light is kept for the next runs', 'ok'); };
+handlers.live = l => {
+  if (!l || !l.frames) return;
+  $('#lvMedian').textContent = Number(l.median).toFixed(1);
+  $('#lvFps').textContent = l.median > 0 ? (1000 / l.median).toFixed(1) : '—';
+  $('#lvP90').textContent = Number(l.p90).toFixed(1);
+  $('#lvDraws').textContent = num(l.draws);
+};
+
+// ---------------- test run ----------------
+const SETTING_NAMES = {
+  patches: { rtx: 'patches 1+5', all: 'patches all', off: 'no patches' },
+  textureCheck: { exact: 'exact textures', guard: 'fast textures' },
+  lastResort: { on: 'last resort', off: 'no last resort' },
+  mode: { fast: 'Fast', safe: 'Safe' },
+};
+function settingsLine(s) {
+  if (!s) return '';
+  const v = k => s[k] == null ? DEFAULTS[k] : s[k];
+  const parts = ['mode', 'patches', 'textureCheck', 'lastResort'].map(k => (SETTING_NAMES[k] || {})[v(k)] || `${k} ${v(k)}`);
+  parts.push(s.consoleModel === 'series-s' ? 'Series S' : 'Series X');
+  if (s.limited) parts.push('limited memory');
+  if (v('fps60')) parts.push('60 fps');
+  if (v('rayTracing')) parts.push('ray tracing');
+  if (s.customEnv) parts.push('+ variables');
+  return parts.join(' · ');
+}
+async function loadTests() {
+  try { renderTests(await call('tests')); } catch (e) { /* no results yet */ }
+}
+function renderTests(list) {
+  if (!list || !list.length) { $('#testResults').innerHTML = ''; return; }
+  const rows = list.map(r => {
+    const when = String(r.id || '').replace(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2}).*/, '$1-$2-$3 $4:$5');
+    const result = r.problem ? `<td colspan="4" class="e">${esc(r.problem)}</td>`
+      : `<td class="c">${Number(r.median).toFixed(1)} ms</td><td class="c">${Number(r.fps).toFixed(1)}</td><td class="c">${Number(r.p90).toFixed(1)} ms</td><td class="c">${num(r.draws)}</td>`;
+    const pic = r.picture ? `<button class="btn ghost sm" data-file="${esc(r.picture)}">Picture</button>` : '';
+    return `<tr><td>${esc(when)}</td><td>${esc(settingsLine(r.settings))}</td>${result}<td class="c">${Number(r.peakGB || 0).toFixed(1)} GB</td><td>${pic}</td></tr>`;
+  }).join('');
+  $('#testResults').innerHTML = `<table class="reasons"><thead><tr><th>When</th><th>Settings</th><th style="text-align:right">Median</th><th style="text-align:right">fps</th><th style="text-align:right">90%</th><th style="text-align:right">Draws</th><th style="text-align:right">Memory</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  $$('#testResults [data-file]').forEach(b => b.onclick = () => send('openFile', { path: b.dataset.file }));
+}
+$('#btnTest').onclick = async () => {
+  try {
+    const st = await call('test');
+    applyState(st);
+    $('#btnTest').disabled = true;
+    $('#testStatus').textContent = 'Starting the game…';
+  } catch (e) { toast(e.message, 'bad'); }
+};
+handlers.test = t => {
+  $('#btnTest').disabled = true;
+  const s = Math.floor(t.seconds);
+  $('#testStatus').textContent = t.phase === 'waiting'
+    ? `Waiting for the busy scene… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+    : `Measuring… ${Math.ceil(t.left)} s left, ${t.samples} samples`;
+};
+handlers.testDone = r => {
+  $('#btnTest').disabled = false;
+  $('#testStatus').textContent = r.problem ? `Ended: ${r.problem}` : `Median ${Number(r.median).toFixed(1)} ms a frame (${Number(r.fps).toFixed(1)} fps)`;
+  toast(r.problem ? 'Test run ended: ' + r.problem : `Test run: ${Number(r.fps).toFixed(1)} fps`, r.problem ? 'warn' : 'ok');
+  loadTests();
+};
 function scanClock() {
   if (!S.scanning) return;
   const s = Math.floor((Date.now() - S.scanStart) / 1000);
@@ -483,6 +581,7 @@ const OURS = [
   { t: 'No group barrier inside a divergent loop', tag: 'fix', d: 'The blocks of a loop that lanes leave at different times were counted as blocks every lane runs, so an exchange there put a barrier in a divergent loop.' },
   { t: 'WaveActiveAnyTrue choosing a value; masks grown in branches', d: 'A mask operation\'s SCC read as a number is the console wave\'s, and a mask grown inside a branch translates on 64-lane GPUs. Waterfall loops stay without wave operations.' },
   { t: 'DPP row masks name the console\'s rows', tag: 'fix', d: 'In the upper half of a console wave run as two host waves, row_mask bits 2 and 3 name its rows; the host lanes 0 to 31 named rows 0 and 1.' },
+  { t: 'Wave64 last resort', d: 'A console wave64 program that no form translates for a 32-lane card takes its per-lane branches by the whole wave at once, instead of the game going without it. 2,757 of the game\'s 2,763 compute programs translate on NVIDIA (2,737 before): the water\'s volumetric light and GPU particle emitters among them; none that translated changed.' },
   { t: 'Whole-wave sums and minimums over both halves', tag: 'fix', d: 'The s_add or s_min joining the two halves\' results stopped the program (upstream a8bfe78\'s scalar steps, ported); a console wave with no upper half counts it as the identity, not 0.' },
 ];
 const COOLFOX = [
@@ -499,7 +598,7 @@ function renderInside() {
   $('#commits').innerHTML = c.map(([v, k]) => `<div><b>${esc(v || '—')}</b><span>${k}</span></div>`).join('');
   if (i.source) $('#insideSub').innerHTML = `The VIctory build this launcher carries, and what is in it. Source: <a href="${esc(i.source)}">${esc(i.source.replace('https://', ''))}</a>`;
   let h = `<div class="group"><div class="group-head"><h2>The fastest fork as its base</h2><span>by avatarmanz ·</span><a href="https://github.com/avatarmanz/VIctory-7900XTX">VIctory-7900XTX</a></div>
-    <div class="measure"><div class="big">280 → 46–65 ms</div><p>a frame in the same scenes of the prologue on an RX 7900 XTX (13–22 fps indoors and on the water, as its author measured). Built on fxceless/victory-fork, with DexNom's, Belobug's, ZJOU's and myokex's work in its history.</p></div>
+    <div class="measure"><div class="big">280 → 44.9 ms</div><p>a frame in the same scenes on an RX 7900 XTX, as its author measured: 57–75 ms before its renderer ports, 44.9 ms (about 22 fps) with ports 1, 2, 5, 6 and 7. Merged here up to c9c932cb. Built on fxceless/victory-fork, with DexNom's, Belobug's, ZJOU's and myokex's work in its history.</p></div>
     <div class="patches">${BASE.map(([t, d]) => `<div class="patch"><div class="t">${esc(t)}</div><p>${esc(d)}</p></div>`).join('')}</div></div>`;
   h += `<div class="group"><div class="group-head"><h2>Added here: console wave64 exact on NVIDIA</h2><span>by God489 ·</span><a href="https://github.com/Belobug/VIctory-Belobug-AMD/pull/128">from #68 and #128</a></div>
     <div class="measure"><div class="big">8 → 29 of 29</div><p>programs of the console's 64-lane waves give the console's values, lane by lane, on an RTX 3050 through the whole translation (21 were wrong or refused before), and 22 of the 26 wave64 tests of #68 and #128 pass (10 before). The fork's own 916 tests still pass.</p></div>

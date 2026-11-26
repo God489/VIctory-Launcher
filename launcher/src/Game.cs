@@ -184,18 +184,73 @@ namespace VictoryLauncher
             Env(p, "VICTORY_DATA_DIR", Str(settings, "dataDir"));
             Env(p, "VICTORY_CACHE_DIR", Str(settings, "cacheDir"));
             for (int i = 0; i < Played.GetLength(0); i++) Env(p, Played[i, 0], Played[i, 1]);
-            if (Str(settings, "mode") == "safe")
+            // Quality (the default): the list calls carried out on the title's threads and no
+            // joined submissions. codec_d/cool_fox on an RTX 4060 (8 GB): with VICTORY_THIN=1 the
+            // heads of people in play do not draw (eyes and teeth only), and with
+            // VICTORY_JOIN_PARTS=8 the opening video repeats frames. Fast is the 7900XTX fork's
+            // way, faster with those faults; Safe leaves out its newest paths as well.
+            string mode = Str(settings, "mode");
+            // Fast unless chosen otherwise: the runs that held on an RTX 3050 (tests A and B,
+            // 2026-11-26) were Fast.
+            if (mode == "") mode = "fast";
+            if (mode == "safe")
             {
                 Env(p, "VICTORY_UNDER_WIDE", "0");
                 Env(p, "VICTORY_LAND_ECHO", "0");
             }
-            else
+            else if (mode == "fast")
             {
                 Env(p, "VICTORY_THIN", "1");
                 Env(p, "VICTORY_JOIN_PARTS", "8");
                 Env(p, "VICTORY_UPLOAD_AHEAD", "1");
             }
+            else
+            {
+                Env(p, "VICTORY_THIN", "0");
+                Env(p, "VICTORY_JOIN_PARTS", "0");
+                Env(p, "VICTORY_UPLOAD_AHEAD", "1");
+            }
             if (Bool(settings, "rayTracing")) Env(p, "VICTORY_BVH_BUILDER", "1");
+            // What codec_d/cool_fox runs with by default, which the 7900XTX fork took behind
+            // switches: one-slot heaps where a list sets none, XMA voices refilled, the heap
+            // buffer pass per heap, a DirectStorage staging floor of 256 MiB.
+            Env(p, "VICTORY_FALLBACK_HEAPS", "1");
+            Env(p, "VICTORY_XMA_REFILL", "1");
+            Env(p, "VICTORY_SWEEP_PER_HEAP", "1");
+            Env(p, "VICTORY_DSTORAGE_STAGING_MB", "256");
+            // Renderer patches (the 7900XTX fork's ports): 1 and 5 by default, as cool_fox runs
+            // them on RTX cards; "all" adds 2, 6 and 7 (avatarmanz: 57-75 ms to 44.9 ms).
+            string patches = Str(settings, "patches");
+            if (patches != "off")
+            {
+                Env(p, "VICTORY_PORT_CONSTANTS", "1");
+                Env(p, "VICTORY_PORT_CBV", "1");
+                if (patches == "all")
+                {
+                    Env(p, "VICTORY_PORT_DESCRIPTORS", "1");
+                    Env(p, "VICTORY_PORT_GUARD", "1");
+                    Env(p, "VICTORY_PORT_JOURNAL", "1");
+                }
+            }
+            // Exact texture checks: every check hashes the texture (cool_fox: the write guard
+            // misses some of the title's writes; skin and a phone's frame read colour noise).
+            if (Str(settings, "textureCheck") != "guard") Env(p, "VICTORY_TEXTURE_GUARD", "0");
+            // 60 fps: the title's own 30 fps cap and our clock follow 16.667 ms (menus, videos).
+            if (Bool(settings, "fps60")) Env(p, "VICTORY_FRAME_INTERVAL_MS", "16.667");
+            // Output size (Series X; the 7900XTX fork's VICTORY_OUTPUT): the title renders to
+            // that size itself, at 2/3 of it with its own upscaler. Auto: 1920x1080 on a card
+            // under 12 GB (4K output asks for more than such a card has), the title's own else.
+            if (ConsoleModel() == "series-x")
+            {
+                string output = OutputSize();
+                if (output != "") Env(p, "VICTORY_OUTPUT", output);
+            }
+            // The live link: commands to the running game, its numbers each second (Live).
+            Env(p, "VICTORY_LIVE", LiveDir);
+            // Wave64 programs no other form translates (four in the opening cutscene on a
+            // 32-lane card): their per-lane branches taken by the whole console wave at once,
+            // instead of the title going without them.
+            if (Str(settings, "lastResort") != "off") Env(p, "VICTORY_WAVE_LAST_RESORT", "1");
             // Limited memory: what codec_d/cool_fox runs with on an RTX 5090 with 32 GB of RAM
             // (its Play-VIctory.cmd pareto-residency): textures' levels made on demand, every
             // title buffer copied into the card's memory, and the air's light raised (indoor
@@ -205,10 +260,18 @@ namespace VictoryLauncher
                 Env(p, "VICTORY_LEVELS_ON_DEMAND", "1");
                 Env(p, "VICTORY_CARD_BUFFERS_MIN_KB", "64");
                 Env(p, "VICTORY_AMBIENT_AIR", "1.5");
+                // cool_fox's residency budgets (the 7900XTX fork's VICTORY_RESIDENCY), and no
+                // driver recompiles in the background (cool_fox's 4 GB profile).
+                Env(p, "VICTORY_RESIDENCY", "1");
+                Env(p, "VICTORY_D3D12_BACKGROUND", "0");
             }
+            // The light stand-in: an even level by default (cool_fox: the estimate follows the
+            // frame's radiance, and a bright doorway washed the whole room out); "estimate" as
+            // the 7900XTX fork plays.
             string ambient = Str(settings, "ambient");
             if (ambient == "") ambient = "0.8";
-            if (ambient != "off") Env(p, "VICTORY_AMBIENT", ambient);
+            if (ambient != "off")
+                Env(p, "VICTORY_AMBIENT", Str(settings, "ambientMode") != "constant" || ambient.StartsWith("constant:") ? ambient : "constant:" + ambient);
             if (Str(settings, "textureBack") == "off") Env(p, "VICTORY_TEXTURE_BACK", "0");
             if (Bool(settings, "panel")) Env(p, "VICTORY_PANEL", "1");
             if (Str(settings, "pipelineBook") != "off") Env(p, "VICTORY_PIPELINE_BOOK", "1");
@@ -220,6 +283,17 @@ namespace VictoryLauncher
                 var m = Regex.Match(raw.Trim(), @"^(VICTORY_[A-Z0-9_]+)\s*=\s*(.*)$");
                 if (m.Success) p.EnvironmentVariables[m.Groups[1].Value] = m.Groups[2].Value.Trim();
             }
+        }
+
+        /// The output size asked for: as chosen, or with "auto" 1920x1080 on a card under 12 GB
+        /// of video memory; "" for the title's own (4K on Series X).
+        string OutputSize()
+        {
+            string o = Str(settings, "output");
+            if (o == "native") return "";
+            if (System.Text.RegularExpressions.Regex.IsMatch(o, @"^\d+x\d+$")) return o;
+            var g = Native.Gpu();
+            return g.DedicatedMemory > 0 && g.DedicatedMemory < 12UL << 30 ? "1920x1080" : "";
         }
 
         /// The memory profile: "limited" or "standard", or by this PC's RAM when "auto" (under
@@ -299,13 +373,19 @@ namespace VictoryLauncher
             t.Start();
         }
 
-        /// The console model: as chosen, or with "auto" (or nothing chosen) Series S on a PC of
-        /// limited memory (less memory and smaller targets, as cool_fox runs) and Series X else.
+        /// The console model: as chosen, or with "auto" (or nothing chosen) Series S where Series X
+        /// does not fit, and Series X else. Series X draws the faces that Series S leaves out
+        /// (codec_d/cool_fox on an RTX 4060: eyes and teeth only), but on an RTX 3050 (8 GB) with
+        /// 16 GB of RAM a Series X run filled the card ("the card has no room for new ones") and
+        /// ended two minutes in with E_OUTOFMEMORY, where Series S runs on: so Series S on a card
+        /// under 12 GB or with limited memory.
         string ConsoleModel()
         {
             string c = Str(settings, "console");
             if (c == "series-s" || c == "series-x") return c;
-            return LimitedMemory() ? "series-s" : "series-x";
+            var g = Native.Gpu();
+            bool smallCard = g.DedicatedMemory > 0 && g.DedicatedMemory < 12UL << 30;
+            return smallCard || LimitedMemory() ? "series-s" : "series-x";
         }
 
         // ---------- running the title ----------
@@ -332,7 +412,7 @@ namespace VictoryLauncher
             Directory.CreateDirectory(LogsDir);
             foreach (var old in Directory.GetFiles(LogsDir, "session-*.log").OrderByDescending(f => f).Skip(9))
                 try { File.Delete(old); } catch { }
-            string logFile = Path.Combine(LogsDir, "session-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log");
+            string logFile = Path.Combine(LogsDir, "session-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture) + ".log");
             sessionLog = new StreamWriter(logFile, false, new UTF8Encoding(false));
             sessionLog.AutoFlush = true;
             sessionLog.WriteLine("# " + info.FileName + " " + info.Arguments);
@@ -343,6 +423,7 @@ namespace VictoryLauncher
             lastError = "";
             lastCaption = "";
             stoppedByUser = false;
+            LiveClear();
             if (job != IntPtr.Zero) Native.CloseHandle(job);
             job = Native.NewJob();
             child = new Process { StartInfo = info, EnableRaisingEvents = true };
@@ -390,6 +471,7 @@ namespace VictoryLauncher
             var pids = job == IntPtr.Zero ? new List<int>() : Native.JobProcesses(job);
             if (pids.Count == 0 && (child == null || child.HasExited))
             {
+                if (test != null) FinishTest(stoppedByUser ? "stopped by the user" : "the game ended before the measurement was done");
                 game.Stop();
                 int code = 0;
                 try { code = child != null ? child.ExitCode : 0; } catch { }
@@ -411,6 +493,8 @@ namespace VictoryLauncher
             IntPtr h;
             string caption = Native.WindowOf(pids, out h);
             if (caption != null) lastCaption = caption;
+            TestTick(h, caption, pids);
+            LiveTick();
             Event("state", State());
         }
 

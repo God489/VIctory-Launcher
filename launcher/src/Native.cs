@@ -262,6 +262,10 @@ namespace VictoryLauncher
         public static extern bool SetForegroundWindow(IntPtr hwnd);
         [DllImport("user32.dll")]
         public static extern bool ShowWindow(IntPtr hwnd, int cmd);
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT { public int Left, Top, Right, Bottom; }
+        [DllImport("user32.dll")]
+        public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
 
         /// The caption and handle of the first visible titled window of any of `pids`.
         public static string WindowOf(List<int> pids, out IntPtr found)

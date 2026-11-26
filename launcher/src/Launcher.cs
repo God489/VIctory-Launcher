@@ -20,7 +20,7 @@ namespace VictoryLauncher
 {
     static class Program
     {
-        public const string Version = "1.3.1";
+        public const string Version = "1.4.0";
         public static string Home;      // %LOCALAPPDATA%\VIctory Launcher
         public static string Runtime;   // the unpacked payload of this build
 
@@ -319,6 +319,19 @@ namespace VictoryLauncher
                     return true;
                 case "play":
                     return Play();
+                case "test":
+                    return StartTest();
+                case "tests":
+                    return TestList();
+                case "liveSet":
+                    return LiveSet(Str(m, "text"));
+                case "openFile":
+                    {
+                        string f = Str(m, "path");
+                        if (f.StartsWith(Path.Combine(Program.Home, "tests"), StringComparison.OrdinalIgnoreCase) && File.Exists(f))
+                            Process.Start(new ProcessStartInfo(f) { UseShellExecute = true });
+                        return true;
+                    }
                 case "stop":
                     Stop();
                     return true;
@@ -356,7 +369,7 @@ namespace VictoryLauncher
                     {
                         d.Title = "Save the log";
                         d.Filter = "Text files (*.txt;*.log)|*.txt;*.log|All files (*.*)|*.*";
-                        d.FileName = "victory-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log";
+                        d.FileName = "victory-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture) + ".log";
                         if (d.ShowDialog(this) != DialogResult.OK) return false;
                         File.WriteAllText(d.FileName, Str(m, "text"), new UTF8Encoding(false));
                         return true;

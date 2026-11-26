@@ -108,7 +108,7 @@ $bw.Close()
 function Read-GitValue([string[]]$a) { (& git.exe -C $VictoryRepo @a 2>$null | Select-Object -First 1) }
 $info = [ordered]@{
     victoryCommit = Read-GitValue @('rev-parse', '--short=7', 'HEAD')
-    baseCommit    = '0a43566'   # avatarmanz/VIctory-7900XTX, as taken
+    baseCommit    = 'c9c932cb'  # avatarmanz/VIctory-7900XTX main, as merged
     fixCommit     = Read-GitValue @('log', '-1', '--format=%h', '--', 'crates/victory-shader/src/emit/console_wave_tests.rs')
     built         = (Get-Date -Format 'yyyy-MM-dd')
     source        = $Source
