@@ -673,6 +673,25 @@ pub fn emit(
                 }
             }
         }
+        // Last resort (`VICTORY_WAVE_LAST_RESORT=1`, off by default): a program no other form
+        // translates, which the title would otherwise go without, takes its per-lane branches
+        // as the console does, by the whole wave at once ([`widen`]). Only such programs: the
+        // ones another form takes keep it, so none moves to group barriers in branches that
+        // ran without them (`VICTORY_WAVE_WIDE=1` moves every one, and lost the card).
+        if !wide_on
+            && !driver_loop
+            && std::env::var_os("VICTORY_WAVE_LAST_RESORT").is_some_and(|v| v == "1")
+            && let Some(base) = [forms[1].1.as_ref().map(|f| &f.0), forms[0].1.as_ref().map(|f| &f.0), Some(p)]
+                .into_iter()
+                .flatten()
+                .next()
+        {
+            let again = widen(c, native, base, why, false);
+            report("wave-wide branches (last resort)", &again);
+            if done(&again) {
+                return again.map(|(shader, _)| shader);
+            }
+        }
     }
     // SCC of a mask operation joined with a scalar test behind a per-lane skip (the 32-lane
     // trace programs): right once the wave takes that skip together ([`widen`]; the
