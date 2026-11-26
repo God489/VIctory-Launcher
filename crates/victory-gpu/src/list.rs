@@ -248,6 +248,16 @@ fn pools() -> bool {
     *ON.get_or_init(|| std::env::var_os("VICTORY_LIST_POOL").is_none_or(|v| v != "0"))
 }
 
+/// Lets go of every host list kept idle, and with them the command memory
+/// their allocators keep, for a host object the system refused memory for
+/// ([`crate::host::short_of_memory`]); the pool fills again as lists run.
+/// How many there were.
+#[cfg(windows)]
+pub(crate) fn let_go_idle() -> usize {
+    let idle = std::mem::take(&mut *IDLE.lock().unwrap_or_else(|e| e.into_inner()));
+    idle.0.len()
+}
+
 /// A host list open for recording: one that has run, as a title's list is
 /// after its reset, or a new one.
 #[cfg(windows)]

@@ -1145,6 +1145,130 @@ pub(crate) fn warp_adapter() -> windows::core::Result<IDXGIAdapter> {
 
 #[cfg(test)]
 mod tests {
+    /// A host object the system refused memory for is tried again, and only
+    /// then: a success or another error comes back from the first try, and a
+    /// refusal that lasts comes back after the last wait.
+    #[test]
+    fn short_of_memory_tries_again_only_while_memory_is_refused() {
+        use super::{SHORT_OF_MEMORY_WAITS, short_of_memory};
+        use windows::Win32::Foundation::{E_FAIL, E_OUTOFMEMORY};
+        let mut tries = 0;
+        let made = short_of_memory("test", || {
+            tries += 1;
+            if tries < 3 { Err(E_OUTOFMEMORY.into()) } else { Ok(tries) }
+        });
+        assert_eq!(made.ok(), Some(3));
+        let mut tries = 0;
+        let failed: windows::core::Result<()> = short_of_memory("test", || {
+            tries += 1;
+            Err(E_FAIL.into())
+        });
+        assert_eq!((failed.unwrap_err().code(), tries), (E_FAIL, 1));
+        let mut tries = 0;
+        let refused: windows::core::Result<()> = short_of_memory("test", || {
+            tries += 1;
+            Err(E_OUTOFMEMORY.into())
+        });
+        assert_eq!(
+            (refused.unwrap_err().code(), tries),
+            (E_OUTOFMEMORY, 1 + SHORT_OF_MEMORY_WAITS.len())
+        );
+    }
+
+    /// What this PC's driver takes in private bytes for a command allocator,
+    /// for a command list on it, and for an allocator that recorded a list of
+    /// barriers once and was reset. Run with `--ignored --nocapture`.
+    #[cfg(feature = "diagnostics")]
+    #[test]
+    #[ignore = "measurement"]
+    fn what_a_host_list_costs() {
+        use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_12_0;
+        use windows::Win32::Graphics::Direct3D12::*;
+        const N: usize = 200;
+        let mut device: Option<ID3D12Device> = None;
+        // SAFETY: plain device creation on the default adapter.
+        unsafe { D3D12CreateDevice(None, D3D_FEATURE_LEVEL_12_0, &mut device) }.unwrap();
+        let device = device.unwrap();
+        let mb = |a: u64, b: u64| (b as f64 - a as f64) / N as f64 / (1 << 20) as f64;
+        let start = super::private_bytes();
+        // SAFETY (all): plain creation, recording and reset of our own objects.
+        let allocators: Vec<ID3D12CommandAllocator> = (0..N)
+            .map(|_| unsafe { device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT) }.unwrap())
+            .collect();
+        let with_allocators = super::private_bytes();
+        let lists: Vec<ID3D12GraphicsCommandList> = allocators
+            .iter()
+            .map(|a| unsafe { device.CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, a, None) }.unwrap())
+            .collect();
+        let with_lists = super::private_bytes();
+        let shared: ID3D12CommandAllocator =
+            unsafe { device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT) }.unwrap();
+        let before_shared = super::private_bytes();
+        let more: Vec<ID3D12GraphicsCommandList> = (0..N)
+            .map(|_| {
+                let l: ID3D12GraphicsCommandList =
+                    unsafe { device.CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, &shared, None) }.unwrap();
+                unsafe { l.Close() }.unwrap();
+                l
+            })
+            .collect();
+        let with_shared = super::private_bytes();
+        // a barrier-heavy recording, as a big frame's lists have, then a reset
+        let buffer: ID3D12Resource = {
+            let heap = D3D12_HEAP_PROPERTIES { Type: D3D12_HEAP_TYPE_DEFAULT, ..Default::default() };
+            let desc = D3D12_RESOURCE_DESC {
+                Dimension: D3D12_RESOURCE_DIMENSION_BUFFER,
+                Width: 65536,
+                Height: 1,
+                DepthOrArraySize: 1,
+                MipLevels: 1,
+                SampleDesc: windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                Layout: D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+                Flags: D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+                ..Default::default()
+            };
+            let mut b = None;
+            unsafe {
+                device.CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COMMON, None, &mut b)
+            }
+            .unwrap();
+            b.unwrap()
+        };
+        let barrier = D3D12_RESOURCE_BARRIER {
+            Type: D3D12_RESOURCE_BARRIER_TYPE_UAV,
+            Anonymous: D3D12_RESOURCE_BARRIER_0 {
+                UAV: std::mem::ManuallyDrop::new(D3D12_RESOURCE_UAV_BARRIER {
+                    pResource: std::mem::ManuallyDrop::new(Some(buffer.clone())),
+                }),
+            },
+            ..Default::default()
+        };
+        let before_recording = super::private_bytes();
+        for l in &lists {
+            for _ in 0..4000 {
+                unsafe { l.ResourceBarrier(std::slice::from_ref(&barrier)) };
+            }
+            unsafe { l.Close() }.unwrap();
+        }
+        let recorded = super::private_bytes();
+        for (a, l) in allocators.iter().zip(&lists) {
+            unsafe { a.Reset() }.unwrap();
+            unsafe { l.Reset(a, None) }.unwrap();
+            unsafe { l.Close() }.unwrap();
+        }
+        let reset = super::private_bytes();
+        println!(
+            "per object, MB: allocator {:.3}; list on its own allocator {:.3}; list on a shared allocator {:.3}; \
+             4,000 barriers recorded {:.3}; kept after the allocator's reset {:.3}",
+            mb(start, with_allocators),
+            mb(with_allocators, with_lists),
+            mb(before_shared, with_shared),
+            mb(before_recording, recorded),
+            mb(before_recording, reset),
+        );
+        drop((more, lists, allocators, shared));
+    }
+
     /// A list of ours is found by its name, with the debug layer's note or not.
     #[cfg(feature = "diagnostics")]
     #[test]
@@ -1338,6 +1462,60 @@ pub(crate) struct HostList {
 
 /// A list's prelude: an allocator and a closed list.
 type Prelude = (ID3D12CommandAllocator, ID3D12GraphicsCommandList);
+
+/// The waits, in milliseconds, between tries of a host object the system
+/// refused memory for ([`short_of_memory`]): 1.6 s in all.
+const SHORT_OF_MEMORY_WAITS: [u64; 7] = [10, 25, 50, 100, 200, 400, 800];
+
+/// Episodes of [`short_of_memory`]: tries that met `E_OUTOFMEMORY`, and of
+/// them the ones a later try made good (diagnostics and the end of run).
+pub(crate) static SHORT_OF_MEMORY: [std::sync::atomic::AtomicU64; 2] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 2];
+
+/// `make`, tried again while the system refuses the memory (`E_OUTOFMEMORY`:
+/// the commit charge met its limit, which Windows raises by growing its page
+/// file a moment later, or the driver ran out of the memory of a command
+/// allocator): the host lists kept idle are let go first, with the command
+/// memory their allocators keep ([`crate::list::let_go_idle`]), then each
+/// try waits a little longer, 1.6 s in all. A prelude, a host list or the
+/// reset of one the system refused memory for ended the run: on an RTX 3050
+/// with 16 GB of RAM three minutes in, the private bytes at 20.4 GB
+/// ("host GPU failure: no host list for a state prelude").
+pub(crate) fn short_of_memory<T>(
+    what: &'static str,
+    mut make: impl FnMut() -> windows::core::Result<T>,
+) -> windows::core::Result<T> {
+    let refused = |r: &windows::core::Result<T>| {
+        r.as_ref()
+            .is_err_and(|e| e.code() == windows::Win32::Foundation::E_OUTOFMEMORY)
+    };
+    let mut made = make();
+    if !refused(&made) {
+        return made;
+    }
+    SHORT_OF_MEMORY[0].fetch_add(1, Ordering::Relaxed);
+    let let_go = crate::list::let_go_idle();
+    let mut waited = 0;
+    for wait in SHORT_OF_MEMORY_WAITS {
+        std::thread::sleep(std::time::Duration::from_millis(wait));
+        waited += wait;
+        made = make();
+        if !refused(&made) {
+            break;
+        }
+    }
+    if made.is_ok() {
+        SHORT_OF_MEMORY[1].fetch_add(1, Ordering::Relaxed);
+    }
+    tracing::warn!(
+        what,
+        idle_host_lists_let_go = let_go,
+        waited_ms = waited,
+        made = made.is_ok(),
+        "the system was short of memory for a host object"
+    );
+    made
+}
 
 /// Whether a host list's prelude is made when the list first needs one. A
 /// prelude runs the texture transitions and twin copies a list needs before
@@ -4211,17 +4389,15 @@ impl Host {
     /// An allocator and a closed list for a prelude.
     fn make_prelude(&self) -> Option<Prelude> {
         // SAFETY: plain object creation.
-        let made: windows::core::Result<Prelude> = unsafe {
-            (|| {
-                let allocator: ID3D12CommandAllocator =
-                    self.device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT)?;
-                let list: ID3D12GraphicsCommandList =
-                    self.device
-                        .CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, &allocator, None)?;
-                list.Close()?;
-                Ok((allocator, list))
-            })()
-        };
+        let made: windows::core::Result<Prelude> = short_of_memory("a host list for a prelude", || unsafe {
+            let allocator: ID3D12CommandAllocator =
+                self.device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT)?;
+            let list: ID3D12GraphicsCommandList =
+                self.device
+                    .CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, &allocator, None)?;
+            list.Close()?;
+            Ok((allocator, list))
+        });
         LISTS[1].fetch_add(1, Ordering::Relaxed);
         match made {
             Ok(prelude) => Some(prelude),
@@ -4235,15 +4411,18 @@ impl Host {
     fn make_list(&self) -> windows::core::Result<HostList> {
         // SAFETY: plain object creation.
         unsafe {
-            let allocator: ID3D12CommandAllocator = self
-                .device
-                .CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT)?;
-            let list: ID3D12GraphicsCommandList = self.device.CreateCommandList(
-                0,
-                D3D12_COMMAND_LIST_TYPE_DIRECT,
-                &allocator,
-                None,
-            )?;
+            let (allocator, list) = short_of_memory("a host list", || {
+                let allocator: ID3D12CommandAllocator = self
+                    .device
+                    .CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT)?;
+                let list: ID3D12GraphicsCommandList = self.device.CreateCommandList(
+                    0,
+                    D3D12_COMMAND_LIST_TYPE_DIRECT,
+                    &allocator,
+                    None,
+                )?;
+                Ok((allocator, list))
+            })?;
             let prelude = OnceLock::new();
             if !lazy_prelude() {
                 let _ = prelude.set(self.make_prelude());
@@ -6590,12 +6769,13 @@ impl HostList {
                 give_chunks(std::mem::take(&mut scratch.chunks));
             }
         }
-        // SAFETY: the list is not executing.
-        let reset = unsafe {
+        // SAFETY: the list is not executing (nor recording, when its
+        // reset is tried again).
+        let reset = short_of_memory("the reset of a host list", || unsafe {
             self.allocator
                 .Reset()
                 .and_then(|()| self.list.Reset(&self.allocator, None))
-        };
+        });
         if let Err(e) = reset {
             fail(format_args!("a host command list did not reset ({e})"));
         }
@@ -6957,8 +7137,9 @@ impl HostList {
             fail(format_args!("no host list for a state prelude"));
         };
         // SAFETY: the prelude is not executing (every submission is waited
-        // for); the textures are live.
-        let recorded = unsafe {
+        // for); the textures are live. Recorded whole again when the system
+        // refused the memory.
+        let recorded = short_of_memory("the recording of a state prelude", || unsafe {
             allocator.Reset().and_then(|()| {
                 list.Reset(allocator, None)?;
                 if !to_copy.is_empty() {
@@ -6972,7 +7153,7 @@ impl HostList {
                 }
                 list.Close()
             })
-        };
+        });
         if let Err(e) = recorded {
             fail(format_args!("a host state prelude did not record ({e})"));
         }
@@ -10083,7 +10264,8 @@ impl Host {
         let mut buffer: Option<ID3D12Resource> = None;
         let mut data = std::ptr::null_mut();
         // SAFETY: plain creation and mapping of a CPU-visible buffer.
-        let made = unsafe {
+        let made = short_of_memory("a shared buffer", || unsafe {
+            buffer = None;
             self.device
                 .CreateCommittedResource(
                     &heap,
@@ -10099,7 +10281,7 @@ impl Host {
                     mapped(&self.device)?;
                     b.Map(0, None, Some(&mut data))
                 })
-        };
+        });
         #[cfg(feature = "diagnostics")]
         if made.is_ok()
             && let Some(b) = &buffer
