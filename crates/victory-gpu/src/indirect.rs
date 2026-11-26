@@ -2696,7 +2696,9 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
             }
             sig.unwrap()
         };
-        // Three records of 65,535 x 16 groups: about half the budget each.
+        // Three records of 16,384 x 64 groups (2^20, 64 a group): half the
+        // budget each, so two spend all of it and the small record after them
+        // runs empty whether the third takes the rest (`rest`) or nothing.
         let Some((big, big_ptr)) = host.shared_buffer(3 * u64::from(STRIDE)) else {
             return;
         };
@@ -2709,7 +2711,7 @@ void main(uint3 g : SV_GroupID, uint i : SV_GroupIndex) {
         // SAFETY: mapped buffers of these sizes; nothing runs yet.
         unsafe {
             for i in 0..3 {
-                let words = [65535u32, 16, 1];
+                let words = [16384u32, 64, 1];
                 std::ptr::copy_nonoverlapping(
                     words.as_ptr().cast::<u8>(),
                     big_ptr.add(i * STRIDE as usize),
@@ -3146,53 +3148,58 @@ void main(uint3 group : SV_GroupID, uint3 thread : SV_DispatchThreadID) {
     }
 
     /// Records past the list's budget come out empty, and one read by many
-    /// executions is charged for each.
+    /// executions is charged for each: with `rest` the one that does not
+    /// fit takes what is left, without it (the default) nothing.
     #[test]
     fn warp_batch_charges_every_execution() {
         let Some(mut warp) = WarpHarness::new() else {
             return;
         };
-        let pass = make_from(&warp.device, batch::SOURCE).expect("the batched clamp must compile on WARP");
         const BUDGET: u32 = 1 << 27;
-        // 2^26 vertices each, as much as a draw is let run: two fill it.
-        for (times, records, filled) in [(1u32, 3u64, 2usize), (2, 1, 1), (1, 1, 1), (3, 1, 0)] {
-            let (_src, src_ptr, src_gpu) = warp.shared_buffer(64 << 10);
-            let (_budget, budget_ptr, budget_gpu) = warp.shared_buffer(256);
-            let (back, back_ptr, _) = warp.shared_buffer(1024);
-            let (_table, table_ptr, table_gpu) = warp.shared_buffer(batch::TABLE);
-            let dst = warp.default_uav(64 << 10);
-            batch::record(&pass, &warp.list, (&dst, D3D12_RESOURCE_STATE_COMMON), budget_gpu, [src_gpu; 4], table_gpu);
-            // SAFETY: mapped buffers, which the list has not read yet.
-            let mut table = unsafe {
-                std::ptr::write_bytes(budget_ptr, 0, 256);
-                for r in 0..records {
-                    for (w, word) in [1u32 << 22, 16, 5, 6].into_iter().enumerate() {
-                        src_ptr.cast::<u32>().add(r as usize * 4 + w).write_volatile(word);
+        for rest in [false, true] {
+            let source = batch::SOURCE.replace("REST ?", if rest { "true ?" } else { "false ?" });
+            let pass = make_from(&warp.device, &source).expect("the batched clamp must compile on WARP");
+            // 2^26 vertices each, as much as a draw is let run: two fill it.
+            for (times, records, filled) in [(1u32, 3u64, 2usize), (2, 1, 1), (1, 1, 1), (3, 1, 0)] {
+                let (_src, src_ptr, src_gpu) = warp.shared_buffer(64 << 10);
+                let (_budget, budget_ptr, budget_gpu) = warp.shared_buffer(256);
+                let (back, back_ptr, _) = warp.shared_buffer(1024);
+                let (_table, table_ptr, table_gpu) = warp.shared_buffer(batch::TABLE);
+                let dst = warp.default_uav(64 << 10);
+                batch::record(&pass, &warp.list, (&dst, D3D12_RESOURCE_STATE_COMMON), budget_gpu, [src_gpu; 4], table_gpu);
+                // SAFETY: mapped buffers, which the list has not read yet.
+                let mut table = unsafe {
+                    std::ptr::write_bytes(budget_ptr, 0, 256);
+                    for r in 0..records {
+                        for (w, word) in [1u32 << 22, 16, 5, 6].into_iter().enumerate() {
+                            src_ptr.cast::<u32>().add(r as usize * 4 + w).write_volatile(word);
+                        }
+                    }
+                    batch::Table::new(table_ptr, 0, [1, 0, 0, 0])
+                };
+                for _ in 0..times {
+                    for r in 0..records {
+                        assert_eq!(table.place(1, r * 16, 0), Some(r * u64::from(batch::SLOT)));
                     }
                 }
-                batch::Table::new(table_ptr, 0, [1, 0, 0, 0])
-            };
-            for _ in 0..times {
-                for r in 0..records {
-                    assert_eq!(table.place(1, r * 16, 0), Some(r * u64::from(batch::SLOT)));
+                // SAFETY: an open list; the records are readable as arguments.
+                unsafe {
+                    warp.list.ResourceBarrier(&[transition(&dst, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_COPY_SOURCE)]);
+                    warp.list.CopyBufferRegion(&back, 0, &dst, 0, 256);
                 }
+                warp.submit_and_wait();
+                // SAFETY: the list has run; mapped words.
+                let (spent, out): (u32, Vec<u32>) = unsafe {
+                    (
+                        budget_ptr.cast::<u32>().read_volatile(),
+                        (0..records as usize).map(|r| back_ptr.cast::<u32>().add(r * batch::SLOT as usize / 4).read_volatile()).collect(),
+                    )
+                };
+                assert_eq!(out.iter().filter(|&&v| v == 1 << 22).count(), filled, "{times} times {records}: {out:?}");
+                assert!(out.iter().all(|&v| v == 0 || v == 1 << 22));
+                let charged = if rest { BUDGET.min((1 << 26) * times * records as u32) } else { (1 << 26) * times * filled as u32 };
+                assert_eq!(spent, charged, "rest {rest}, {times} times {records}");
             }
-            // SAFETY: an open list; the records are readable as arguments.
-            unsafe {
-                warp.list.ResourceBarrier(&[transition(&dst, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_COPY_SOURCE)]);
-                warp.list.CopyBufferRegion(&back, 0, &dst, 0, 256);
-            }
-            warp.submit_and_wait();
-            // SAFETY: the list has run; mapped words.
-            let (spent, out): (u32, Vec<u32>) = unsafe {
-                (
-                    budget_ptr.cast::<u32>().read_volatile(),
-                    (0..records as usize).map(|r| back_ptr.cast::<u32>().add(r * batch::SLOT as usize / 4).read_volatile()).collect(),
-                )
-            };
-            assert_eq!(out.iter().filter(|&&v| v == 1 << 22).count(), filled, "{times} times {records}: {out:?}");
-            assert!(out.iter().all(|&v| v == 0 || v == 1 << 22));
-            assert_eq!(spent, BUDGET.min((1 << 26) * times * records as u32));
         }
     }
 
