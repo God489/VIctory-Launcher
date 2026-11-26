@@ -2888,6 +2888,13 @@ impl State {
                 served = false;
                 break;
             }
+            // No host copy for want of the card's memory: the slot stays in
+            // the queue and is looked at again once the card may have room
+            // (marked done, it was never uploaded, #256).
+            if texture.is_none() && crate::resource::retrying(resource) {
+                host.texture_slot_held(index, write, frame + 1);
+                continue;
+            }
             let title_fills = texture.is_some_and(crate::texture::title_written);
             if !title_fills {
                 at_once();
