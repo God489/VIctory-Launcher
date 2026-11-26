@@ -20,7 +20,7 @@ namespace VictoryLauncher
 {
     static class Program
     {
-        public const string Version = "1.1.0";
+        public const string Version = "1.2.0";
         public static string Home;      // %LOCALAPPDATA%\VIctory Launcher
         public static string Runtime;   // the unpacked payload of this build
 

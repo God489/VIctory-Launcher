@@ -27,14 +27,17 @@ by Microsoft. **Not playable yet** on most machines: see "Where it stands".
 The console runs most of the title's compute programs in waves of 64 lanes; NVIDIA runs
 waves of 32, so each console wave runs as two halves. `emit::console_wave_tests` runs 29
 cases (programs and the values the console gives, from #68 and #128) through the whole
-translation, fallbacks included, and on the GPU, lane by lane. On an RTX 3050:
+translation, fallbacks included, and on the GPU, lane by lane. `emit::belobug_wave64_tests`
+runs the 26 console wave64 tests of Belobug/VIctory-Belobug-AMD (#68, #128 and the
+upstream ones beside them) the same way. On an RTX 3050:
 
 | | `0a43566` (the base) | this |
 |---|---|---|
-| cases with the console's values | 8 of 29 | **29 of 29** |
-| the base's own tests | 916 passed | 916 passed, + 2 new |
+| the 29 cases with the console's values | 8 | **29** |
+| the 26 Belobug tests that pass | 10 | **22** |
+| the base's own tests | 916 passed | 916 passed, + 24 new |
 
-What was wrong, each now covered by those cases:
+What was wrong, each now covered by those tests:
 
 - **`ds_bpermute_b32` / `ds_permute_b32`.** AMD's RDNA ISA (10.4.4) runs them within each
   32-lane half of a wave64, "as if were two independent wave32's". `ds_bpermute` read
@@ -57,9 +60,21 @@ What was wrong, each now covered by those cases:
 - **A mask operation's SCC read as a number** (`WaveActiveAnyTrue` choosing a value) is the
   console wave's; a mask grown inside a branch translates on 64-lane GPUs. Waterfall loops
   are unchanged (no wave operations).
+- **DPP row masks name the console's rows.** In the upper half of a console wave run as two
+  host waves, `row_mask` bits 2 and 3 name its rows; the host lanes 0..31 named rows 0 and 1.
+- **Whole-wave reductions combine both halves.** The section simulation followed only
+  `s_mov` and `s_and` among scalar steps, so the `s_add` / `s_min` joining the two halves'
+  results (read with `v_readlane` 0 and 32) stopped the program (upstream VIctory `a8bfe78`'s
+  scalar steps, ported). A console wave with no upper half counts it as the operation's
+  identity, not 0 (a minimum over 96 threads was 0).
 
 Not exact yet: a loop's exit mask counted after the loop
-(`console_wave64_programs_not_yet_exact`, ignored).
+(`console_wave64_programs_not_yet_exact`, ignored), and 4 of the Belobug tests
+(`lane_writes_reach_lanes_outside_the_branch`, `loops_run_while_any_lane_of_the_console_wave_does`,
+`loops_with_an_exit_mask_grown_from_zero`, `several_console_waves_loop_on_their_own`,
+ignored): they need the console flow, in which every lane of a console wave runs each block
+it runs and a loop runs while any lane does. This tree does not have it (the base keeps
+group barriers out of branches, which lost the card in its runs); they failed on the base too.
 
 ### The launcher
 

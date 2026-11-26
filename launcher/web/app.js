@@ -478,6 +478,8 @@ const OURS = [
   { t: 'Scalars after divergent loops and branches', tag: 'fix', d: 'Every lane reads what the wave\'s last iteration or last path left, as on the console (upstream b67d15d, TheHoracio), over both halves on NVIDIA. Before, each lane read its own: 1, 2, 3 … instead of 64.' },
   { t: 'No group barrier inside a divergent loop', tag: 'fix', d: 'The blocks of a loop that lanes leave at different times were counted as blocks every lane runs, so an exchange there put a barrier in a divergent loop.' },
   { t: 'WaveActiveAnyTrue choosing a value; masks grown in branches', d: 'A mask operation\'s SCC read as a number is the console wave\'s, and a mask grown inside a branch translates on 64-lane GPUs. Waterfall loops stay without wave operations.' },
+  { t: 'DPP row masks name the console\'s rows', tag: 'fix', d: 'In the upper half of a console wave run as two host waves, row_mask bits 2 and 3 name its rows; the host lanes 0 to 31 named rows 0 and 1.' },
+  { t: 'Whole-wave sums and minimums over both halves', tag: 'fix', d: 'The s_add or s_min joining the two halves\' results stopped the program (upstream a8bfe78\'s scalar steps, ported); a console wave with no upper half counts it as the identity, not 0.' },
 ];
 function renderInside() {
   const i = S.info;
@@ -488,7 +490,7 @@ function renderInside() {
     <div class="measure"><div class="big">280 → 46–65 ms</div><p>a frame in the same scenes of the prologue on an RX 7900 XTX (13–22 fps indoors and on the water, as its author measured). Built on fxceless/victory-fork, with DexNom's, Belobug's, ZJOU's and myokex's work in its history.</p></div>
     <div class="patches">${BASE.map(([t, d]) => `<div class="patch"><div class="t">${esc(t)}</div><p>${esc(d)}</p></div>`).join('')}</div></div>`;
   h += `<div class="group"><div class="group-head"><h2>Added here: console wave64 exact on NVIDIA</h2><span>by God489 ·</span><a href="https://github.com/Belobug/VIctory-Belobug-AMD/pull/128">from #68 and #128</a></div>
-    <div class="measure"><div class="big">8 → 29 of 29</div><p>programs of the console's 64-lane waves give the console's values, lane by lane, on an RTX 3050 through the whole translation (the other 21 were wrong or refused before). The fork's own 916 tests still pass.</p></div>
+    <div class="measure"><div class="big">8 → 29 of 29</div><p>programs of the console's 64-lane waves give the console's values, lane by lane, on an RTX 3050 through the whole translation (21 were wrong or refused before), and 22 of the 26 wave64 tests of #68 and #128 pass (10 before). The fork's own 916 tests still pass.</p></div>
     <div class="patches">${OURS.map(p => `<div class="patch"><div class="t">${esc(p.t)}${p.tag === 'fix' ? '<span class="tag fix">bug fix</span>' : ''}</div><p>${esc(p.d)}</p></div>`).join('')}</div></div>`;
   h += `<div class="group"><div class="group-head"><h2>Upstream</h2><span>by Marvisak and contributors ·</span><a href="https://github.com/Marvisak/VIctory">VIctory</a></div>
     <div class="card"><p class="muted" style="margin:0">The title's x86-64 code runs unchanged inside VIctory's process; VIctory supplies the platform underneath it and converts the title's data, ahead of time where it can and on first use where it must (shaders).</p></div></div>`;
