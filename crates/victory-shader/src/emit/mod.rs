@@ -901,15 +901,7 @@ fn emit_program(
     // shortcut: older containers fall back to the group's lane count, right
     // when the HLSL group fills its waves (the title's do).
     let mesh_stride = match &native.io {
-        crate::native::StageIo::Ms(ms) => {
-            let psv = c.part(FourCC::PSV0).map(|p| p.data);
-            let threads = psv
-                .filter(|d| crate::dxbc::u32_at(d, 0).is_ok_and(|n| n >= 48))
-                .and_then(|d| crate::dxbc::u32_at(d, 4 + 36).ok());
-            threads.map_or(ms.threads, |t| {
-                t.max(ms.max_vertices).max(ms.max_primitives)
-            })
-        }
+        crate::native::StageIo::Ms(ms) => mesh_stride(c, ms),
         _ => 0,
     };
     let l = lower::lower(&lower::Parts {
@@ -947,6 +939,82 @@ fn emit_program(
         root_indexed_views: res.root_indexed_views.clone(),
     };
     Ok((shader, wave_size))
+}
+
+/// Stride multiplying `SV_GroupID.x` in a console mesh shader's `v5` input:
+/// `max(threads, vertices, primitives)` (the code divides by that). The HLSL
+/// thread count is `NumThreadsX * NumThreadsY * NumThreadsZ` in `PSV0` from
+/// runtime info version 2 on: with X alone, a group of 8 x 8 divided by 8 and
+/// read another group's meshlets. Ported from Marvisak/VIctory#3304
+/// (fuzeofficial).
+// shortcut: older containers fall back to the group's lane count, right when
+// the HLSL group fills its waves (Grand Theft Auto VI's do).
+fn mesh_stride(c: &Container, ms: &crate::native::MeshIo) -> u32 {
+    let threads = c
+        .part(FourCC::PSV0)
+        .map(|p| p.data)
+        .filter(|d| crate::dxbc::u32_at(d, 0).is_ok_and(|n| n >= 48))
+        .and_then(|d| {
+            let x = crate::dxbc::u32_at(d, 4 + 36).ok()?;
+            let y = crate::dxbc::u32_at(d, 4 + 40).ok()?;
+            let z = crate::dxbc::u32_at(d, 4 + 44).ok()?;
+            x.checked_mul(y)?.checked_mul(z).filter(|&n| n > 0)
+        })
+        .unwrap_or(ms.threads);
+    threads.max(ms.max_vertices).max(ms.max_primitives)
+}
+
+#[cfg(test)]
+mod mesh_stride_tests {
+    use super::*;
+
+    /// `mesh_stride` multiplies all three `PSVRuntimeInfo2` thread dimensions
+    /// and still takes the maximum with `max_vertices` and `max_primitives` when
+    /// `PSV0` is absent, older than runtime info version 2, or zeroed
+    /// (Marvisak/VIctory#3304).
+    #[test]
+    fn mesh_stride_multiplies_psv_thread_dimensions_and_applies_output_maxima() {
+        let psv = |info_size: u32, threads: Option<[u32; 3]>| {
+            let mut out = vec![0u8; 4 + info_size as usize];
+            out[0..4].copy_from_slice(&info_size.to_le_bytes());
+            if let Some(dims) = threads {
+                for (k, n) in dims.into_iter().enumerate() {
+                    out[4 + 36 + 4 * k..4 + 40 + 4 * k].copy_from_slice(&n.to_le_bytes());
+                }
+            }
+            out
+        };
+        let stride = |psv0: Option<&[u8]>, threads, max_vertices, max_primitives| {
+            let parts: Vec<(FourCC, &[u8])> = psv0.map(|d| (FourCC::PSV0, d)).into_iter().collect();
+            let bytes = crate::dxbc::build(&parts);
+            let c = Container::parse(&bytes).unwrap();
+            let ms = crate::native::MeshIo {
+                outputs: vec![],
+                clip_cntl: 0,
+                threads,
+                max_vertices,
+                max_primitives,
+                topology: 2,
+                lds_bytes: 0,
+            };
+            mesh_stride(&c, &ms)
+        };
+        // 1D partial wave uses exact PSV0 thread count rather than wave-rounded ms.threads.
+        assert_eq!(stride(Some(&psv(48, Some([24, 1, 1]))), 32, 16, 16), 24);
+        // 2D, 3D (PSV0 v3 = 52 bytes), and Z-only thread groups multiply X * Y * Z.
+        assert_eq!(stride(Some(&psv(48, Some([8, 8, 1]))), 64, 32, 32), 64);
+        assert_eq!(stride(Some(&psv(52, Some([4, 4, 4]))), 64, 16, 16), 64);
+        assert_eq!(stride(Some(&psv(48, Some([1, 1, 128]))), 128, 3, 1), 128);
+        // Output maxima still dominate when larger than X * Y * Z.
+        assert_eq!(stride(Some(&psv(48, Some([8, 4, 1]))), 32, 64, 128), 128);
+        // Missing or pre-v2 PSV0 falls back to ms.threads and still applies output maxima.
+        assert_eq!(stride(None, 64, 128, 256), 256);
+        assert_eq!(stride(Some(&psv(36, None)), 64, 128, 32), 128);
+        // Zeroed or overflowing PSV0 dimensions fall back cleanly without panicking.
+        assert_eq!(stride(Some(&psv(48, Some([0, 0, 0]))), 64, 16, 16), 64);
+        assert_eq!(stride(Some(&psv(48, Some([0, 0, 0]))), 64, 128, 32), 128);
+        assert_eq!(stride(Some(&psv(48, Some([u32::MAX, 2, 1]))), 64, 128, 32), 128);
+    }
 }
 
 /// The title's vertex output interpolation lives in PSV0. A float packed
