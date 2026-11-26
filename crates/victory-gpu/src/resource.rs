@@ -1745,12 +1745,39 @@ pub(crate) fn room(memory: Option<[u64; 4]>) -> bool {
         // (`crate::shadow::card_room_kept`) and for the render targets a
         // world makes in its first frame ([`targets_room_kept`]) counts as
         // used.
-        Some([budget, used, ..]) => {
+        Some([budget, used, shared_budget, shared_used]) => {
             used.saturating_sub(crate::pool::texture_room()) + crate::shadow::card_room_kept() + targets_room_kept()
                 < budget / 100 * room_percent()
+                && !shared_full(shared_budget, shared_used)
         }
         None => filled < WITHOUT_BUDGET,
     }
+}
+
+/// Whether the PC's memory shared with the card is too full for another
+/// texture: at [`shared_room_percent`] of the system's budget for it. What
+/// the card has no room for, the system moves there, and the host copies of
+/// title memory live there (`Host::shared_buffer`). On an RTX 3050 (8 GB)
+/// with 16 GB of RAM that budget (7,405 MB) is the one met first: the
+/// world's first frame made 5.8 GB of copies in 16 s, and at 7,397 MB the
+/// device was removed (run D-new-gpu); the card's own memory had 0.6 GB
+/// under its budget then, and textures went on being made there.
+#[cfg(windows)]
+fn shared_full(budget: u64, used: u64) -> bool {
+    budget != 0 && used >= budget / 100 * shared_room_percent()
+}
+
+/// `VICTORY_SHARED_ROOM_PERCENT` (50 to 99, 85): how full the PC's memory
+/// shared with the card may be before the texture queue makes no more.
+#[cfg(windows)]
+fn shared_room_percent() -> u64 {
+    static PERCENT: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *PERCENT.get_or_init(|| {
+        std::env::var("VICTORY_SHARED_ROOM_PERCENT")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map_or(85, |percent| percent.clamp(50, 99))
+    })
 }
 
 /// The bytes of the card's memory the texture queue leaves free for
@@ -3356,6 +3383,19 @@ pub(crate) fn test_buffer(width: u64) -> This {
 mod tests {
     use super::*;
     use crate::object::slot;
+
+    /// The texture queue stops at 85 % of the PC's memory shared with the
+    /// card (run D-new-gpu's budget: 7,405 MB), and a budget the system did
+    /// not give stops nothing.
+    #[cfg(windows)]
+    #[test]
+    fn the_texture_queue_stops_short_of_the_shared_budget() {
+        const MB: u64 = 1 << 20;
+        assert!(!shared_full(7405 * MB, 6100 * MB));
+        assert!(shared_full(7405 * MB, 6300 * MB));
+        assert!(shared_full(7405 * MB, 7397 * MB));
+        assert!(!shared_full(0, 7397 * MB));
+    }
 
     #[test]
     fn a8_unorm_is_not_in_the_r8_typeless_family() {
