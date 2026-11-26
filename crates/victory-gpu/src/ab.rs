@@ -31,7 +31,8 @@ static BITS: AtomicU32 = AtomicU32::new(0);
 
 /// Whether `switch` is on now, if it is one of those that change.
 pub(crate) fn pick(switch: &str) -> Option<bool> {
-    bit(switch).map(on)
+    // A value the live link set wins ([`crate::live`]).
+    crate::live::flag(switch).or_else(|| bit(switch).map(on))
 }
 
 /// The number of `switch` among those that change.

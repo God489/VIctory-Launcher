@@ -94,6 +94,8 @@ pub mod signature;
 mod switch;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod ab;
+#[cfg(all(windows, feature = "diagnostics"))]
+mod live;
 #[cfg(windows)]
 mod tdr;
 #[cfg(windows)]

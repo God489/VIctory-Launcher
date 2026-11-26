@@ -93,6 +93,11 @@ fn parse(set: &str) -> Set {
 }
 
 fn set() -> Set {
+    // The live link's level wins ([`crate::live`]): the light tuned while the title runs.
+    #[cfg(all(windows, feature = "diagnostics"))]
+    if let Some(v) = crate::live::value("VICTORY_AMBIENT") {
+        return parse(&v);
+    }
     static SET: OnceLock<Set> = OnceLock::new();
     *SET.get_or_init(|| parse(&std::env::var("VICTORY_AMBIENT").unwrap_or_default()))
 }
@@ -105,6 +110,10 @@ pub(crate) fn on() -> bool {
 /// The most the air scatters, as a multiple of the light around
 /// (`VICTORY_AMBIENT_AIR=<multiple>`; unset or 0: what the title has).
 fn air() -> f32 {
+    #[cfg(all(windows, feature = "diagnostics"))]
+    if let Some(v) = crate::live::value("VICTORY_AMBIENT_AIR") {
+        return v.trim().parse().ok().filter(|v: &f32| v.is_finite() && *v > 0.0).unwrap_or(0.0);
+    }
     static SET: OnceLock<f32> = OnceLock::new();
     *SET.get_or_init(|| {
         let set = std::env::var("VICTORY_AMBIENT_AIR").unwrap_or_default();
