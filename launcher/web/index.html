@@ -77,6 +77,7 @@
                 <button class="btn danger" id="btnStop">Stop</button>
               </div>
               <div class="seg" id="segConsole" data-setting="console">
+                <button data-v="auto" title="Series S on a PC with less than 48 GB of RAM">Auto</button>
                 <button data-v="series-x">Series X</button>
                 <button data-v="series-s">Series S</button>
               </div>
@@ -130,8 +131,12 @@
       <div class="card">
         <h3>Console</h3>
         <div class="row">
-          <div class="label"><b>Console model</b><span>The device type and memory the title sees.</span><code>--console</code></div>
-          <div class="seg" data-setting="console"><button data-v="series-x">Series X</button><button data-v="series-s">Series S</button></div>
+          <div class="label"><b>Console model</b><span>The device type and memory the title sees. Auto picks Series S with the limited memory profile (less memory, smaller targets), Series X otherwise.</span><code>--console</code></div>
+          <div class="seg" data-setting="console"><button data-v="auto">Auto</button><button data-v="series-x">Series X</button><button data-v="series-s">Series S</button></div>
+        </div>
+        <div class="row">
+          <div class="label"><b>Memory profile</b><span id="memoryText">Limited is what codec_d/cool_fox runs with on an RTX 5090 with 32 GB of RAM: textures' levels made on demand, every title buffer copied into the card's memory, the air's light raised, Series S. Standard is the 7900XTX fork's, for 64 GB. Auto picks Limited under 48 GB of RAM.</span><code>VICTORY_LEVELS_ON_DEMAND · VICTORY_CARD_BUFFERS_MIN_KB · VICTORY_AMBIENT_AIR</code></div>
+          <div class="seg" data-setting="memory"><button data-v="auto">Auto</button><button data-v="standard">Standard</button><button data-v="limited">Limited</button></div>
         </div>
       </div>
 
@@ -287,13 +292,14 @@
       <div class="about">
         <svg class="mark big" viewBox="0 0 64 64"><use href="#logo"/></svg>
         <h1>VIctory Launcher <span id="aboutVer"></span></h1>
-        <p class="lead">A Windows launcher for VIctory, which runs the Xbox Series X|S release of Grand Theft Auto VI natively on Windows from files you supply. This build carries avatarmanz's VIctory-7900XTX, the fastest fork, with console wave64 made exact on 32-lane GPUs (NVIDIA) on top.</p>
+        <p class="lead">A Windows launcher for VIctory, which runs the Xbox Series X|S release of Grand Theft Auto VI natively on Windows from files you supply. This build carries avatarmanz's VIctory-7900XTX, the fastest fork, with console wave64 made exact on 32-lane GPUs (NVIDIA) and codec_d's NVIDIA and 32 GB RAM work on top.</p>
         <div class="about-grid">
           <div class="card"><h3>Credits</h3>
             <ul class="links">
               <li><a href="https://github.com/Marvisak/VIctory">VIctory</a><span>by Marvisak and its contributors: the base of everything here.</span></li>
               <li><a href="https://github.com/avatarmanz/VIctory-7900XTX">VIctory-7900XTX</a><span>by avatarmanz: the fork this build is made from, and its speed.</span></li>
               <li><a href="https://github.com/fxceless/victory-fork">fxceless/victory-fork</a><span>the fork VIctory-7900XTX started from, with DexNom's, Belobug's, ZJOU's and myokex's work in its history.</span></li>
+              <li><a href="https://github.com/DoubleGhosty/cool_fox">cool_fox</a><span>by codec_d: the NVIDIA RTX and 32 GB RAM work merged here, and the Limited memory profile.</span></li>
               <li><a href="https://github.com/Belobug/VIctory-Belobug-AMD/pull/128">Wave64 on 32-lane GPUs</a><span>the fixes added here (after PRs #68 and #128) and this launcher, by God489.</span></li>
               <li><a href="https://developer.microsoft.com/microsoft-edge/webview2/">Microsoft Edge WebView2</a><span>draws this window.</span></li>
             </ul>

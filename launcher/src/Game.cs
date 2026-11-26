@@ -196,6 +196,16 @@ namespace VictoryLauncher
                 Env(p, "VICTORY_UPLOAD_AHEAD", "1");
             }
             if (Bool(settings, "rayTracing")) Env(p, "VICTORY_BVH_BUILDER", "1");
+            // Limited memory: what codec_d/cool_fox runs with on an RTX 5090 with 32 GB of RAM
+            // (its Play-VIctory.cmd pareto-residency): textures' levels made on demand, every
+            // title buffer copied into the card's memory, and the air's light raised (indoor
+            // haze otherwise). With Series S (ConsoleModel).
+            if (LimitedMemory())
+            {
+                Env(p, "VICTORY_LEVELS_ON_DEMAND", "1");
+                Env(p, "VICTORY_CARD_BUFFERS_MIN_KB", "64");
+                Env(p, "VICTORY_AMBIENT_AIR", "1.5");
+            }
             string ambient = Str(settings, "ambient");
             if (ambient == "") ambient = "0.8";
             if (ambient != "off") Env(p, "VICTORY_AMBIENT", ambient);
@@ -210,6 +220,16 @@ namespace VictoryLauncher
                 var m = Regex.Match(raw.Trim(), @"^(VICTORY_[A-Z0-9_]+)\s*=\s*(.*)$");
                 if (m.Success) p.EnvironmentVariables[m.Groups[1].Value] = m.Groups[2].Value.Trim();
             }
+        }
+
+        /// The memory profile: "limited" or "standard", or by this PC's RAM when "auto" (under
+        /// 48 GB: the 7900XTX build takes 40-46 GB of private memory in the world).
+        bool LimitedMemory()
+        {
+            string m = Str(settings, "memory");
+            if (m == "limited") return true;
+            if (m == "standard") return false;
+            return Native.Memory().ullTotalPhys < 48UL << 30;
         }
 
         static void Env(ProcessStartInfo p, string name, string value)
@@ -279,9 +299,13 @@ namespace VictoryLauncher
             t.Start();
         }
 
+        /// The console model: as chosen, or with "auto" (or nothing chosen) Series S on a PC of
+        /// limited memory (less memory and smaller targets, as cool_fox runs) and Series X else.
         string ConsoleModel()
         {
-            return Str(settings, "console") == "series-s" ? "series-s" : "series-x";
+            string c = Str(settings, "console");
+            if (c == "series-s" || c == "series-x") return c;
+            return LimitedMemory() ? "series-s" : "series-x";
         }
 
         // ---------- running the title ----------

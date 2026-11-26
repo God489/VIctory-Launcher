@@ -40,7 +40,7 @@ const send = (cmd, args) => call(cmd, args).catch(e => toast(e.message, 'bad'));
 
 // ---------------- state ----------------
 const DEFAULTS = {
-  console: 'series-x', mode: 'fast', panel: false, pipelineBook: 'on', rayTracing: false,
+  console: 'auto', memory: 'auto', mode: 'fast', panel: false, pipelineBook: 'on', rayTracing: false,
   ambient: '0.8', textureBack: 'on', unimplemented: 'trap', strict: false, titleArgs: '', customEnv: '',
   dataDir: '', cacheDir: '', minimizeOnPlay: false, logLevel: 'info',
   scanLanes: 'auto', scanValidate: true, firstRunSeen: false,
@@ -276,7 +276,7 @@ function renderSystem() {
   $('#readyGrid').innerHTML = t.join('');
   renderGpuCard();
 }
-handlers.system = s => { S.system = s; renderSystem(); };
+handlers.system = s => { S.system = s; renderSystem(); syncControls(); };
 
 function renderGpuCard() {
   const s = S.system, g = (s && s.gpu) || {};
@@ -315,6 +315,10 @@ function syncControls() {
   $('#scanValidate').disabled = !hasValidator;
   if (!hasValidator) $('#scanValidate').checked = false;
   $('#validatorText').textContent = hasValidator ? 'Checks each translated shader with ' + S.info.validator : 'Needs dxil.dll from the Windows SDK, which is not installed: shaders are translated only.';
+  // what Auto picks on this PC (the launcher decides the same way: under 48 GB, Limited)
+  const ram = S.system && S.system.ramTotal;
+  const base = 'Limited is what codec_d/cool_fox runs with on an RTX 5090 with 32 GB of RAM: textures\' levels made on demand, every title buffer copied into the card\'s memory, the air\'s light raised, Series S. Standard is the 7900XTX fork\'s, for 64 GB. Auto picks Limited under 48 GB of RAM.';
+  $('#memoryText').textContent = ram ? `${base} This PC: ${fmtGB(ram)}, so Auto is ${ram < 48 * 1073741824 ? 'Limited, Series S' : 'Standard, Series X'}.` : base;
 }
 $$('.seg[data-setting]').forEach(seg => seg.addEventListener('click', e => {
   const b = e.target.closest('button');
@@ -481,6 +485,14 @@ const OURS = [
   { t: 'DPP row masks name the console\'s rows', tag: 'fix', d: 'In the upper half of a console wave run as two host waves, row_mask bits 2 and 3 name its rows; the host lanes 0 to 31 named rows 0 and 1.' },
   { t: 'Whole-wave sums and minimums over both halves', tag: 'fix', d: 'The s_add or s_min joining the two halves\' results stopped the program (upstream a8bfe78\'s scalar steps, ported); a console wave with no upper half counts it as the identity, not 0.' },
 ];
+const COOLFOX = [
+  { t: 'Memory for 32 GB of RAM', d: 'Residency and upload budgets; a GPU pool that cannot grow backs off instead of failing, and uploads wait while Windows is short of commit. 120 heavy intervals with no out-of-memory return at a 34.4 GB peak (Memory profile: Limited).' },
+  { t: 'Descriptor slots freed when the card is done', tag: 'fix', d: 'Slots go back when the GPU finishes the work that used them, and bindless refreshes stay within their own heap.' },
+  { t: 'Series S two-plane black screen', tag: 'fix', d: 'The retail plane is read at its 72-byte stride; the two planes compose again.' },
+  { t: 'More wave64 programs on NVIDIA', d: 'Wave-wide branches on by default for two scene kernels checked on RTX cards, and for loops that run while any lane of the console wave does: both host halves keep going until both finish. A mask operation\'s SCC chosen on is the whole console wave\'s. A program left needing 64-lane waves on a 32-lane card is refused at translation.' },
+  { t: 'XMA audio, movie planes, fence wakes', tag: 'fix', d: 'XMA decoding fixes, movie-plane uploads spread over frames, fences woken with WaitOnAddress instead of polling.' },
+  { t: 'Shader fixes', tag: 'fix', d: 'd16 typed integer loads and stores, and the write guard on join edges no lane reaches.' },
+];
 function renderInside() {
   const i = S.info;
   const c = [[i.victoryCommit, 'this build'], [i.baseCommit, 'avatarmanz/VIctory-7900XTX'], [i.fixCommit, 'our fixes'], [i.built, 'built']];
@@ -492,6 +504,9 @@ function renderInside() {
   h += `<div class="group"><div class="group-head"><h2>Added here: console wave64 exact on NVIDIA</h2><span>by God489 ·</span><a href="https://github.com/Belobug/VIctory-Belobug-AMD/pull/128">from #68 and #128</a></div>
     <div class="measure"><div class="big">8 → 29 of 29</div><p>programs of the console's 64-lane waves give the console's values, lane by lane, on an RTX 3050 through the whole translation (21 were wrong or refused before), and 22 of the 26 wave64 tests of #68 and #128 pass (10 before). The fork's own 916 tests still pass.</p></div>
     <div class="patches">${OURS.map(p => `<div class="patch"><div class="t">${esc(p.t)}${p.tag === 'fix' ? '<span class="tag fix">bug fix</span>' : ''}</div><p>${esc(p.d)}</p></div>`).join('')}</div></div>`;
+  h += `<div class="group"><div class="group-head"><h2>Added here: NVIDIA and 32 GB of RAM</h2><span>by codec_d ·</span><a href="https://github.com/DoubleGhosty/cool_fox">cool_fox</a></div>
+    <div class="measure"><div class="big">54 ms</div><p>median frame time over 120 heavy intervals of the opening street on an RTX 5090 with 32 GB of RAM, as its author measured with the Limited memory profile, with no out-of-memory error at a 34.4 GB peak (the build before its pool back-off ran out). Its earlier build took 64.2 ms where this took 54.8, in one directional pair of runs. Merged on the same base; every test here passes with it, two of the base's updated for its new default.</p></div>
+    <div class="patches">${COOLFOX.map(p => `<div class="patch"><div class="t">${esc(p.t)}${p.tag === 'fix' ? '<span class="tag fix">bug fix</span>' : ''}</div><p>${esc(p.d)}</p></div>`).join('')}</div></div>`;
   h += `<div class="group"><div class="group-head"><h2>Upstream</h2><span>by Marvisak and contributors ·</span><a href="https://github.com/Marvisak/VIctory">VIctory</a></div>
     <div class="card"><p class="muted" style="margin:0">The title's x86-64 code runs unchanged inside VIctory's process; VIctory supplies the platform underneath it and converts the title's data, ahead of time where it can and on first use where it must (shaders).</p></div></div>`;
   $('#insideList').innerHTML = h;

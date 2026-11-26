@@ -20,7 +20,9 @@ by Microsoft. **Not playable yet** on most machines: see "Where it stands".
    [docs/findings.md](docs/findings.md).
 2. **Console wave64 made exact on 32-lane GPUs (NVIDIA)**, `e630b18`: the fixes below,
    from the work of [Belobug/VIctory-Belobug-AMD #68 and #128](https://github.com/Belobug/VIctory-Belobug-AMD/pull/128).
-3. **The launcher** ([launcher/](launcher/)): a window for all of it.
+3. **NVIDIA RTX and 32 GB of RAM**, from codec_d's [cool_fox](https://github.com/DoubleGhosty/cool_fox)
+   (merged in `39335a3`; it is built on the same base): see below.
+4. **The launcher** ([launcher/](launcher/)): a window for all of it.
 
 ### The fixes, and how they are known to work
 
@@ -35,7 +37,7 @@ upstream ones beside them) the same way. On an RTX 3050:
 |---|---|---|
 | the 29 cases with the console's values | 8 | **29** |
 | the 26 Belobug tests that pass | 10 | **22** |
-| the base's own tests | 916 passed | 916 passed, + 24 new |
+| the base's own tests | 916 passed | 916 passed, + 24 new (+ cool_fox's, below) |
 
 What was wrong, each now covered by those tests:
 
@@ -76,6 +78,39 @@ ignored): they need the console flow, in which every lane of a console wave runs
 it runs and a loop runs while any lane does. This tree does not have it (the base keeps
 group barriers out of branches, which lost the card in its runs); they failed on the base too.
 
+### From cool_fox: NVIDIA RTX and 32 GB of RAM
+
+codec_d took the same base to an RTX 5090 with 32 GB of RAM, half of what the base
+recommends. Its measurements ([docs/bug-journal.md](docs/bug-journal.md)): a median of
+54.3 ms a frame over 120 heavy intervals of the opening street, with no out-of-memory
+error at a peak of 34.4 GB of commit, where the build before its pool back-off ran out of
+memory. What it brings:
+
+- **Memory for limited RAM:** residency and upload budgets that tell mild pressure from
+  a critical commit; a GPU pool that cannot grow backs off for 500 ms and reuses what it
+  has instead of failing; ordinary prefetch waits below 4 GB of free commit; idle pool
+  blocks are trimmed. The launcher's **Memory profile: Limited** (Auto under 48 GB of RAM)
+  sets what it runs with: `VICTORY_LEVELS_ON_DEMAND=1`, `VICTORY_CARD_BUFFERS_MIN_KB=64`,
+  `VICTORY_AMBIENT_AIR=1.5` and Series S.
+- **Descriptor slots freed when the GPU is done** with the work that used them: they were
+  held for 16 more submissions, NVIDIA's dynamic slot pool ran out and draws were dropped.
+- **`VICTORY_INDIRECT_REST` off by default:** an indirect record too large for what is left
+  of its list's budget takes nothing, so the draws after it still run. The base's own
+  findings named that record as the suspect for the outdoor flicker and this as the
+  experiment; two of the base's tests now check both modes (`d55e50a`).
+- **Series S:** the two-plane black screen (the retail plane read at its 72-byte stride).
+- **Wave64 on NVIDIA:** wave-wide branches by default for two RTX-validated scene kernels
+  and for loops that run while any lane of the console wave does; a select on a mask
+  operation's SCC reads the whole console wave's; a program left needing 64-lane waves on
+  a 32-lane card is refused at translation. Our exact path (above) is unchanged: its 29
+  cases and 22 Belobug tests give the same results with the merge.
+- XMA audio fixes, movie-plane uploads spread over frames, fence waits woken by
+  `WaitOnAddress`, d16 typed integer loads, the write guard of join edges no lane reaches,
+  and a 256 MiB DirectStorage window.
+
+With the merge, on an RTX 3050: 950 tests passed (10 of them cool_fox's), 50 ignored, and
+2 failed: the two indirect budget tests above, which pass after `d55e50a`.
+
 ### The launcher
 
 - **Play:** drop the game folder on the window, or browse to it. It reads
@@ -89,7 +124,8 @@ group barriers out of branches, which lost the card in its runs); they failed on
   mesh shader tier, RAM and free commit.
 - **Settings:** each one names the variable it sets: mode, ray-traced light
   (`VICTORY_BVH_BUILDER`), the light estimate (`VICTORY_AMBIENT`), texture read-back, the
-  performance panel (F3), the pipeline book, console model, and any other `VICTORY_*`.
+  performance panel (F3), the pipeline book, console model, memory profile, and any other
+  `VICTORY_*`.
 - **Compatibility:** how many of your game's shaders translate for your GPU
   (`victory translate`).
 - **Logs:** live, filtered and saved per session; `crashes.log` one click away.
@@ -98,9 +134,10 @@ group barriers out of branches, which lost the card in its runs); they failed on
 
 From the base's measurements (one PC: i9-12900K, 64 GB, RX 7900 XTX, 1440p): menus 30 fps;
 the prologue indoors 13-20 fps; the first boat mission 19-22 fps; a street chase 6-10 fps;
-40-46 GB of private memory, so **64 GB of RAM is recommended**. NVIDIA cards had not been
-measured in the world with this; the fixes above make the console's wave64 programs give
-the console's values there.
+40-46 GB of private memory, so **64 GB of RAM is recommended**. On an RTX 5090 with 32 GB
+(cool_fox's measurements, its Limited profile): 54 ms a frame in the opening street,
+34 GB at the peak. The fixes above make the console's wave64 programs give the console's
+values on NVIDIA.
 
 ## Requirements
 
@@ -132,6 +169,8 @@ its DLLs against pinned SHA-256 hashes: the repository holds no binaries
   romainhedouin, [FQY55kai/ZJOU-VICTORY](https://github.com/FQY55kai/ZJOU-VICTORY),
   [myokex/victory-amd](https://github.com/myokex/victory-amd) (with Spexivus, joroyt,
   tightfall and Joshua Odom), Geckomacabre and cxy0072019-sketch.
+- **codec_d**: [cool_fox](https://github.com/DoubleGhosty/cool_fox), the NVIDIA RTX and
+  32 GB RAM work merged here, and its bug journal.
 - **TheHoracio**: the scalars after divergent loops and branches (upstream `b67d15d`).
 - **God489**: the fixes of `e630b18` and the launcher. Made with
   [Claude Code](https://claude.com/claude-code).
