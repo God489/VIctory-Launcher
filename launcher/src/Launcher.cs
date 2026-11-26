@@ -133,6 +133,9 @@ namespace VictoryLauncher
         readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
         Microsoft.Web.WebView2.WinForms.WebView2 web;
         Dictionary<string, object> settings;
+        // What this start went by when settings.json was there but could not be read (another
+        // program held it, or it was cut short): the file is then merged with, never written over.
+        Dictionary<string, object> settingsBase;
         string settingsPath;
         bool uiReady;
 
@@ -259,6 +262,12 @@ namespace VictoryLauncher
             {
                 case "init":
                     uiReady = true;
+                    if (settingsBase != null)
+                    {
+                        // the read at start failed: the file again, now that a moment has passed
+                        var disk = ReadSettings(settingsPath);
+                        if (disk != null) { settings = disk; settingsBase = null; }
+                    }
                     StartSystemProbe();
                     return new Dictionary<string, object> {
                         { "settings", settings },
@@ -407,27 +416,90 @@ namespace VictoryLauncher
 
         // ---------- settings ----------
 
+        /// settings.json; when it cannot be read, the copy the last save kept (.bak), or a save cut
+        /// short before its rename (.tmp, from builds that deleted the file first). A start that
+        /// found the file but could not read it used to show "Add your game" and, on closing,
+        /// wrote its empty settings over the game's path.
         Dictionary<string, object> LoadSettings()
         {
-            try
+            settingsBase = null;
+            var d = ReadSettings(settingsPath);
+            if (d != null) return d;
+            bool there = File.Exists(settingsPath);
+            d = ReadSettings(settingsPath + ".bak") ?? ReadSettings(settingsPath + ".tmp") ?? new Dictionary<string, object>();
+            if (there) settingsBase = new Dictionary<string, object>(d);
+            return d;
+        }
+
+        /// The settings in `file`, or null when it is missing, empty or not JSON. A file another
+        /// program holds for a moment (a scanner, a backup, a sync) is read again for two seconds.
+        Dictionary<string, object> ReadSettings(string file)
+        {
+            bool held;
+            return ReadSettings(file, out held);
+        }
+
+        /// `held`: still unreadable after the two seconds (as opposed to missing, empty or broken).
+        Dictionary<string, object> ReadSettings(string file, out bool held)
+        {
+            held = false;
+            for (int attempt = 0; ; attempt++)
             {
-                if (File.Exists(settingsPath))
+                try
                 {
-                    var d = json.Deserialize<Dictionary<string, object>>(File.ReadAllText(settingsPath));
-                    if (d != null) return d;
+                    if (!File.Exists(file)) return null;
+                    return json.Deserialize<Dictionary<string, object>>(File.ReadAllText(file));
                 }
+                catch (IOException) { if (attempt >= 10) { held = true; return null; } }
+                catch (UnauthorizedAccessException) { if (attempt >= 10) { held = true; return null; } }
+                catch { return null; }
+                System.Threading.Thread.Sleep(200);
             }
-            catch { }
-            return new Dictionary<string, object>();
         }
 
         void SaveSettings()
         {
             try
             {
-                File.WriteAllText(settingsPath + ".tmp", json.Serialize(settings), new UTF8Encoding(false));
-                if (File.Exists(settingsPath)) File.Delete(settingsPath);
-                File.Move(settingsPath + ".tmp", settingsPath);
+                if (settingsBase != null)
+                {
+                    // this start could not read the file: what it holds stays, but for what was
+                    // changed here; still held by another program, it is left as it is; broken (cut
+                    // short, not JSON), it is written anew from what this start went by
+                    bool held;
+                    var disk = ReadSettings(settingsPath, out held);
+                    if (held) return;
+                    if (disk != null)
+                    {
+                        foreach (var kv in settings)
+                        {
+                            object was;
+                            if (!disk.ContainsKey(kv.Key) || !settingsBase.TryGetValue(kv.Key, out was)
+                                || json.Serialize(was) != json.Serialize(kv.Value))
+                                disk[kv.Key] = kv.Value;
+                        }
+                        settings = disk;
+                    }
+                    settingsBase = null;
+                }
+                if (!settings.ContainsKey("gamePath"))
+                {
+                    // this start never learned where the game is (none of the files could be read
+                    // then): the path a copy on disk has stays; "Remove game" leaves "" here instead
+                    var any = ReadSettings(settingsPath) ?? ReadSettings(settingsPath + ".bak") ?? ReadSettings(settingsPath + ".tmp");
+                    object path;
+                    if (any != null && any.TryGetValue("gamePath", out path)) settings["gamePath"] = path;
+                }
+                // written whole and flushed first, then swapped in at once: no moment without the file
+                string tmp = settingsPath + ".tmp";
+                byte[] bytes = new UTF8Encoding(false).GetBytes(json.Serialize(settings));
+                using (var f = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    f.Write(bytes, 0, bytes.Length);
+                    f.Flush(true);
+                }
+                if (File.Exists(settingsPath)) File.Replace(tmp, settingsPath, settingsPath + ".bak", true);
+                else File.Move(tmp, settingsPath);
             }
             catch { }
         }

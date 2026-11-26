@@ -266,6 +266,10 @@ namespace VictoryLauncher
         public struct RECT { public int Left, Top, Right, Bottom; }
         [DllImport("user32.dll")]
         public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+        [DllImport("user32.dll")]
+        public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+        [DllImport("user32.dll")]
+        public static extern bool IsIconic(IntPtr hwnd);
 
         /// The caption and handle of the first visible titled window of any of `pids`.
         public static string WindowOf(List<int> pids, out IntPtr found)

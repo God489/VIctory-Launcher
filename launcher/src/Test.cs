@@ -160,21 +160,33 @@ namespace VictoryLauncher
             });
         }
 
-        /// The window's picture as it is on the screen (the game's swap chain shows there), or "".
+        /// The game window's own picture, or "". PrintWindow with PW_RENDERFULLCONTENT (2) asks the
+        /// compositor for what the window shows, its flip-model swap chain too, so other windows over
+        /// it do not end up in the picture and the focus stays where the player left it (a copy of
+        /// the screen took whatever lay on top). A minimized window is restored first; the screen
+        /// is copied only where PrintWindow fails.
         static string Snapshot(IntPtr window, string file)
         {
             if (window == IntPtr.Zero) return "";
             try
             {
-                Native.ShowWindow(window, 9);
-                Native.SetForegroundWindow(window);
-                System.Threading.Thread.Sleep(400);
+                if (Native.IsIconic(window))
+                {
+                    Native.ShowWindow(window, 9);
+                    System.Threading.Thread.Sleep(400);
+                }
                 Native.RECT r;
                 if (!Native.GetWindowRect(window, out r) || r.Right <= r.Left || r.Bottom <= r.Top) return "";
                 using (var bmp = new Bitmap(r.Right - r.Left, r.Bottom - r.Top))
                 {
                     using (var g = Graphics.FromImage(bmp))
-                        g.CopyFromScreen(r.Left, r.Top, 0, 0, bmp.Size);
+                    {
+                        IntPtr dc = g.GetHdc();
+                        bool printed;
+                        try { printed = Native.PrintWindow(window, dc, 2); }
+                        finally { g.ReleaseHdc(dc); }
+                        if (!printed) g.CopyFromScreen(r.Left, r.Top, 0, 0, bmp.Size);
+                    }
                     bmp.Save(file, ImageFormat.Png);
                 }
                 return file;
