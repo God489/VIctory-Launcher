@@ -22,7 +22,9 @@ by Microsoft. **Not playable yet** on most machines: see "Where it stands".
    from the work of [Belobug/VIctory-Belobug-AMD #68 and #128](https://github.com/Belobug/VIctory-Belobug-AMD/pull/128).
 3. **NVIDIA RTX and 32 GB of RAM**, from codec_d's [cool_fox](https://github.com/DoubleGhosty/cool_fox)
    (merged in `39335a3`; it is built on the same base): see below.
-4. **The launcher** ([launcher/](launcher/)): a window for all of it.
+4. **8 GB cards with 16 GB of RAM** (1.4.0): runs that ended by themselves now go on, the
+   Scarlett picture fixes of avatarmanz #329, and Marvisak #3304's mesh groups: see below.
+5. **The launcher** ([launcher/](launcher/)): a window for all of it.
 
 ### The fixes, and how they are known to work
 
@@ -111,6 +113,48 @@ memory. What it brings:
 With the merge, on an RTX 3050: 950 tests passed (10 of them cool_fox's), 50 ignored, and
 2 failed: the two indirect budget tests above, which pass after `d55e50a`.
 
+### 1.4.0: 8 GB cards with 16 GB of RAM
+
+On an RTX 3050 (8 GB) with 16 GB of RAM the memory met first is the PC's memory shared
+with the card, the system's room for what the card holds in RAM: its budget there is
+7,405 MB. The title's copies in it filled it at the world's first frame, and the run ended
+by itself within three minutes (E_OUTOFMEMORY at a command list's close, the device
+removed, or the driver faulting). Runs of the prologue's opening, launcher defaults
+(Fast, Series S, Limited), one scene of 45 s each:
+
+| | before | 1.4.0 |
+|---|---|---|
+| runs that ended by themselves | 5 of 6 | **0 of 3** |
+| the shared memory's peak (budget 7,405 MB) | 7,210 to 7,423 MB | 6,445 to 7,026 MB |
+| frame time per thousand draws (median) | 118 ms (the build before #329) | 88 to 130 ms |
+
+- **Root views copy their 4 MiB cell where shared memory is short** (`5b4004a7`). #329's
+  reach (a window up to 32 MiB past the cell, against a card fault on an RX 7900 XT) stays
+  where that memory's budget is 12 GiB or more; `VICTORY_ROOT_WINDOW_MB` still decides.
+- **Out of memory is waited out** (`7c1aa2f3`): a command list, its prelude, a reset or a
+  shared buffer that Windows refused memory for ended the run; the idle command lists are
+  let go and the call is tried again for up to 1.6 s. Run D met it twice and went on.
+- **The texture queue counts the shared memory** (`237ac61b`, `5b4004a7`): no texture is
+  made while it is at 95 % of its budget (`VICTORY_SHARED_ROOM_PERCENT`).
+- **avatarmanz #329** (RYUKI-7900XT via zocram4cc): early depth, 16-bit depth image bits, a
+  NaN guard on colour exports, strict scalar spills, aliased views copied again when their
+  card-written source changes. The translator's version is 2: every shader is translated
+  again once (Settings, Prepare shaders).
+- **Marvisak #3304** (fuzeofficial), ported with its test (`f2b31fcd`): a mesh group's
+  index divides by X × Y × Z threads and the output maxima, not X alone.
+- **avatarmanz #293 taken back out** (`0898b635`): textures refused for want of memory were
+  asked for again every 500 ms, and on an 8 GB card the budget left for them is the shared
+  memory the runs met.
+- **Launcher:** a start that could not read `settings.json` (held by another program, or a
+  save cut short) showed "Add your game", and closing it wrote empty settings over the
+  game's path; it now reads again, falls back to the last copy, merges instead of
+  overwriting and saves by an atomic replace (old launcher: the path lost in all five
+  cases; this one: kept in all five). Test run pictures come from the game's window itself.
+
+The memory census behind this: 20 GB of private memory and 13 GB of page-file-backed views
+at the scene, 6.4-7.4 GB of it in shared memory, and 10-26k hard page reads a second.
+Paging is what holds the frame rate there.
+
 ### The launcher
 
 - **Play:** drop the game folder on the window, or browse to it. It reads
@@ -136,8 +180,10 @@ From the base's measurements (one PC: i9-12900K, 64 GB, RX 7900 XTX, 1440p): men
 the prologue indoors 13-20 fps; the first boat mission 19-22 fps; a street chase 6-10 fps;
 40-46 GB of private memory, so **64 GB of RAM is recommended**. On an RTX 5090 with 32 GB
 (cool_fox's measurements, its Limited profile): 54 ms a frame in the opening street,
-34 GB at the peak. The fixes above make the console's wave64 programs give the console's
-values on NVIDIA.
+34 GB at the peak. On an RTX 3050 (8 GB) with 16 GB of RAM (1.4.0): the prologue's
+opening at 450 to 500 ms a frame (about 2 fps), 21 GB of private memory, and paging is the
+limit. The fixes above make the console's wave64 programs give the console's values on
+NVIDIA.
 
 ## Requirements
 
